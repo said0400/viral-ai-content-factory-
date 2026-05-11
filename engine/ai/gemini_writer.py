@@ -19,7 +19,7 @@ class GeminiWriter:
         if not api_key:
             raise ValueError("GEMINI_API_KEY not found in .env")
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel("gemini-1.5-pro")
+        self.model = genai.GenerativeModel("gemini-1.5-flash")
         self.prompt_engine = PromptEngine()
 
     def generate_script(self, topic: str) -> dict:
