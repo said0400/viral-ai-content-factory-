@@ -1,7 +1,7 @@
 google-generativeai>=0.7.2
 elevenlabs>=1.2.2
 arabic-reshaper>=3.0.0
-bidi>=0.0.2
+python-bidi>=0.4.2
 Pillow>=10.3.0
 requests>=2.31.0
 python-dotenv>=1.0.1
