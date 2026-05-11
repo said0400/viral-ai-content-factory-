@@ -1,11 +1,12 @@
 """
-Gemini AI Script Writer
+Gemini AI Script Writer - Updated for google-genai (2026)
 """
 
 import re
 import os
 import json
-import google.generativeai as genai
+from google import genai  # المكتبة الحديثة
+from google.genai import types
 from dotenv import load_dotenv
 from engine.ai.prompt_engine import PromptEngine
 
@@ -18,19 +19,25 @@ class GeminiWriter:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY not found in .env")
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model_name='models/gemini-1.5-flash-latest')
+        
+        # تهيئة العميل في المكتبة الجديدة
+        self.client = genai.Client(api_key=api_key)
+        self.model_id = "gemini-1.5-flash"
         self.prompt_engine = PromptEngine()
 
     def generate_script(self, topic: str) -> dict:
         prompt = self.prompt_engine.build_script_prompt(topic)
-        response = self.model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
+        
+        # طريقة التوليد الجديدة
+        response = self.client.models.generate_content(
+            model=self.model_id,
+            contents=prompt,
+            config=types.GenerateContentConfig(
                 temperature=0.9,
                 max_output_tokens=2000,
-            ),
+            )
         )
+        # الوصول للنص في المكتبة الجديدة يتم عبر response.text
         return self._parse_script(response.text.strip(), topic)
 
     def _parse_script(self, raw: str, topic: str) -> dict:
@@ -55,7 +62,7 @@ class GeminiWriter:
         except (json.JSONDecodeError, KeyError):
             pass
 
-        # محاولة 3: parse نصي
+        # محاولة 3: parse نصي (Manual Parsing)
         lines = [ln.strip() for ln in raw.split("\n")
                  if ln.strip() and len(ln.strip()) > 3]
         scene_types = (
