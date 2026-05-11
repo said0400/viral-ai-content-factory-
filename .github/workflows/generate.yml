@@ -1,0 +1,97 @@
+name: Generate Viral Arabic Video
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: "موضوع الفيديو بالعربية"
+        required: true
+        default: "الطموح والنجاح"
+      preset:
+        description: "جودة الإنتاج"
+        required: true
+        default: "preview"
+        type: choice
+        options:
+          - preview
+          - tiktok
+          - reels
+
+  schedule:
+    - cron: "0 8 * * *"
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download Arabic fonts
+        run: python download_fonts.py
+
+      - name: Verify setup
+        run: |
+          python -c "
+          import arabic_reshaper, subprocess
+          from bidi.algorithm import get_display
+          from PIL import Image
+          print('arabic_reshaper OK')
+          print('bidi OK')
+          print('Pillow OK')
+          r = subprocess.run(['ffmpeg','-filters'], capture_output=True, text=True)
+          print('xfade OK' if 'xfade' in r.stdout else 'xfade MISSING')
+          "
+
+      - name: Generate video
+        env:
+          GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+          ELEVENLABS_API_KEY:   ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID:  ${{ secrets.ELEVENLABS_VOICE_ID }}
+          PEXELS_API_KEY:       ${{ secrets.PEXELS_API_KEY }}
+          VIDEO_WIDTH:          "1080"
+          VIDEO_HEIGHT:         "1920"
+          VIDEO_FPS:            "30"
+          TEMP_DIR:             "./temp"
+          OUTPUT_DIR:           "./output"
+          DEFAULT_TOPIC:        "الطموح والنجاح"
+        run: |
+          python main.py \
+            --topic "${{ github.event.inputs.topic || 'الطموح والنجاح' }}" \
+            --preset "${{ github.event.inputs.preset || 'preview' }}" \
+            --no-cleanup
+
+      - name: Upload video
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: viral-video-${{ github.run_number }}
+          path: |
+            output/*.mp4
+            output/*.jpg
+          retention-days: 7
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Output files" >> $GITHUB_STEP_SUMMARY
+          ls -lh output/ 2>/dev/null | tee -a $GITHUB_STEP_SUMMARY || echo "No output"
