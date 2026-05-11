@@ -7,12 +7,12 @@ import urllib.request
 from pathlib import Path
 
 FONTS = {
-    "Cairo-Black.ttf":
-        "https://github.com/google/fonts/raw/main/ofl/cairo/static/Cairo-Black.ttf",
-    "Tajawal-ExtraBold.ttf":
+    "Cairo-Black.ttf": 
+        "https://github.com/googlefonts/cairo/raw/main/fonts/ttf/Cairo-Black.ttf",
+    "Tajawal-ExtraBold.ttf": 
         "https://github.com/google/fonts/raw/main/ofl/tajawal/Tajawal-ExtraBold.ttf",
-    "Changa-ExtraBold.ttf":
-        "https://github.com/google/fonts/raw/main/ofl/changa/static/Changa-ExtraBold.ttf",
+    "Changa-ExtraBold.ttf": 
+        "https://github.com/googlefonts/changa/raw/main/fonts/ttf/Changa-ExtraBold.ttf",
 }
 
 
