@@ -1,5 +1,5 @@
 """
-ElevenLabs TTS Engine
+ElevenLabs TTS Engine - Human Performance Optimized
 """
 
 import os
@@ -17,10 +17,11 @@ class ElevenLabsTTS:
 
     BASE_URL = "https://api.elevenlabs.io/v1"
 
+    # تم تقليل stability لزيادة العاطفة والتنفس البشري
     VOICE_SETTINGS = {
-        "stability": 0.45,
-        "similarity_boost": 0.85,
-        "style": 0.65,
+        "stability": 0.30, 
+        "similarity_boost": 0.80,
+        "style": 0.70,
         "use_speaker_boost": True,
     }
 
@@ -50,21 +51,31 @@ class ElevenLabsTTS:
         for i, scene in enumerate(scenes):
             text = scene.get("text", "")
             pause_ms = int(scene.get("pause_after", 0.3) * 1000)
-            for emp in scene.get("emphasis", []):
-                w = emp.get("word", "")
-                if w and w in text:
-                    text = text.replace(w, f'<emphasis level="strong">{w}</emphasis>', 1)
+            
+            # حل مشكلة AttributeError مع الحفاظ على المنطق
+            emphasis_data = scene.get("emphasis", [])
+            if isinstance(emphasis_data, list):
+                for emp in emphasis_data:
+                    # التحقق مما إذا كان emp قاموساً أم نصاً مباشراً
+                    w = emp.get("word", "") if isinstance(emp, dict) else str(emp)
+                    if w and w in text:
+                        # استبدال الكلمة بعلامة التوكيد
+                        text = text.replace(w, f'<emphasis level="strong">{w}</emphasis>', 1)
+            
             parts.append(text)
             if i < len(scenes) - 1:
                 parts.append(f"<break time='{pause_ms}ms'/>")
+        
         parts.append("<break time='500ms'/>")
         cta = script.get("cta", "")
         if cta:
             parts.append(f'<emphasis level="moderate">{cta}</emphasis>')
+        
         return " ".join(parts)
 
     def _call_api(self, text: str, retries: int = 3) -> bytes:
         url = f"{self.BASE_URL}/text-to-speech/{self.voice_id}"
+        # موديل v2 هو الوحيد الذي يدعم المشاعر العالية بالعربية
         payload = {
             "text": text,
             "model_id": "eleven_multilingual_v2",
