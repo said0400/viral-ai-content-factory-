@@ -32,18 +32,20 @@ from pathlib import Path
 class SubtitleEngine:
 
     FONT_PATHS = [
-        "engine/assets/fonts/Cairo-Black.ttf",
+        "engine/assets/fonts/Cairo.ttf",
         "engine/assets/fonts/Tajawal-ExtraBold.ttf",
-        "engine/assets/fonts/Changa-ExtraBold.ttf",
+        "engine/assets/fonts/Changa.ttf",
+        "engine/assets/fonts/NotoNaskhArabic.ttf",
+        # أسماء قديمة للتوافق
+        "engine/assets/fonts/Cairo-Black.ttf",
         "engine/assets/fonts/NotoNaskhArabic-Bold.ttf",
     ]
     SYSTEM_FONTS = [
         "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf",
         "/usr/share/fonts/truetype/arabeyes/ae_AlBattar.ttf",
+        "/usr/share/fonts/opentype/noto/NotoNaskhArabic-Regular.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
     ]
 
     def __init__(self, video_width: int = 1080, video_height: int = 1920):
@@ -61,16 +63,21 @@ class SubtitleEngine:
         self.font_sm = self._load_font(font_path, 54)
 
     def _find_font(self) -> str | None:
-        """يبحث عن أفضل خط عربي متاح"""
+        # 1. ابحث في القائمة المحددة
         for p in self.FONT_PATHS + self.SYSTEM_FONTS:
             if os.path.exists(p):
                 return p
-        # بحث تلقائي في مجلد الخطوط
+        # 2. ابحث في مجلد الخطوط تلقائياً
         fonts_dir = Path("engine/assets/fonts")
         if fonts_dir.exists():
             ttfs = list(fonts_dir.glob("*.ttf"))
             if ttfs:
                 return str(ttfs[0])
+        # 3. ابحث في النظام
+        for d in ["/usr/share/fonts/truetype", "/usr/share/fonts/opentype"]:
+            found = list(Path(d).rglob("*.ttf")) if Path(d).exists() else []
+            if found:
+                return str(found[0])
         return None
 
     def _load_font(self, path: str | None, size: int) -> ImageFont.FreeTypeFont:
@@ -85,7 +92,6 @@ class SubtitleEngine:
             return ImageFont.load_default()
 
     def reshape(self, text: str) -> str:
-        """reshape + bidi للنص العربي — الترتيب مهم جداً"""
         try:
             if RESHAPER_OK:
                 text = arabic_reshaper.reshape(text)
@@ -134,13 +140,9 @@ class SubtitleEngine:
             lw = bb[2] - bb[0]
             lx = (self.w - lw) // 2
 
-            # توهج
             self._glow(img, line, font, lx, ly, gc)
-
-            # ظل
             draw.text((lx + shd, ly + shd), line, font=font, fill=(0, 0, 0, 180))
 
-            # فحص التأكيد
             orig_line = raw_lines[li]
             is_emp    = any(w in orig_line for w in emphasis if w)
 
@@ -156,10 +158,6 @@ class SubtitleEngine:
         return out
 
     def _wrap_arabic(self, text: str, font, max_w: int) -> list:
-        """
-        تقسيم النص العربي الأصلي قبل reshape
-        القياس يتم على النص بعد reshape لدقة أكبر
-        """
         words = text.split()
         if not words:
             return [""]
