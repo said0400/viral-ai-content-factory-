@@ -1,44 +1,49 @@
 """
-Gemini AI Script Writer - Updated for google-genai (2026)
+Groq AI Script Writer
 """
 
 import re
 import os
 import json
-from google import genai  # المكتبة الحديثة
-from google.genai import types
+from groq import Groq  # تغيير المكتبة هنا
 from dotenv import load_dotenv
 from engine.ai.prompt_engine import PromptEngine
 
 load_dotenv()
 
 
-class GeminiWriter:
+class GeminiWriter: # حافظنا على اسم الكلاس كما هو لضمان عدم تعطل الاستدعاء في main.py
 
     def __init__(self):
-        api_key = os.getenv("GEMINI_API_KEY")
+        # تغيير المتغير ليقرأ من GROQ_API_KEY
+        api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
-            raise ValueError("GEMINI_API_KEY not found in .env")
+            raise ValueError("GROQ_API_KEY not found in .env")
         
-        # تهيئة العميل في المكتبة الجديدة
-        self.client = genai.Client(api_key=api_key)
-        self.model_id = "gemini-1.5-flash"
+        # تهيئة عميل Groq
+        self.client = Groq(api_key=api_key)
+        # استخدام موديل Llama 3 القوي والسريع
+        self.model_name = "llama-3.3-70b-versatile"
         self.prompt_engine = PromptEngine()
 
     def generate_script(self, topic: str) -> dict:
         prompt = self.prompt_engine.build_script_prompt(topic)
         
-        # طريقة التوليد الجديدة
-        response = self.client.models.generate_content(
-            model=self.model_id,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.9,
-                max_output_tokens=2000,
-            )
+        # استدعاء API الخاص بـ Groq
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": "You are a professional video script writer that outputs JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.9,
+            max_tokens=2000,
+            # تفعيل خاصية JSON Mode لضمان استجابة دقيقة
+            response_format={"type": "json_object"}
         )
-        # الوصول للنص في المكتبة الجديدة يتم عبر response.text
-        return self._parse_script(response.text.strip(), topic)
+        
+        raw_content = response.choices[0].message.content
+        return self._parse_script(raw_content.strip(), topic)
 
     def _parse_script(self, raw: str, topic: str) -> dict:
         # محاولة 1: JSON block
@@ -62,7 +67,7 @@ class GeminiWriter:
         except (json.JSONDecodeError, KeyError):
             pass
 
-        # محاولة 3: parse نصي (Manual Parsing)
+        # محاولة 3: parse نصي
         lines = [ln.strip() for ln in raw.split("\n")
                  if ln.strip() and len(ln.strip()) > 3]
         scene_types = (
