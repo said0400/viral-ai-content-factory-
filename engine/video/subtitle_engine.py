@@ -1,5 +1,3 @@
-# engine/video/subtitle_engine.py
-
 """
 Subtitle Engine
 arabic_reshaper + bidi + Pillow → PNG overlays → FFmpeg
@@ -36,7 +34,6 @@ class SubtitleEngine:
         "engine/assets/fonts/Tajawal-ExtraBold.ttf",
         "engine/assets/fonts/Changa.ttf",
         "engine/assets/fonts/NotoNaskhArabic.ttf",
-        # أسماء قديمة للتوافق
         "engine/assets/fonts/Cairo-Black.ttf",
         "engine/assets/fonts/NotoNaskhArabic-Bold.ttf",
     ]
@@ -58,26 +55,25 @@ class SubtitleEngine:
         font_path = self._find_font()
         print(f"  🔤 Using font: {font_path}")
 
+        # أحجام الخطوط كما هي في منطقك الأصلي
         self.font_lg = self._load_font(font_path, 84)
         self.font_md = self._load_font(font_path, 68)
         self.font_sm = self._load_font(font_path, 54)
 
     def _find_font(self) -> str | None:
-        # 1. ابحث في القائمة المحددة
         for p in self.FONT_PATHS + self.SYSTEM_FONTS:
             if os.path.exists(p):
                 return p
-        # 2. ابحث في مجلد الخطوط تلقائياً
         fonts_dir = Path("engine/assets/fonts")
         if fonts_dir.exists():
             ttfs = list(fonts_dir.glob("*.ttf"))
             if ttfs:
                 return str(ttfs[0])
-        # 3. ابحث في النظام
         for d in ["/usr/share/fonts/truetype", "/usr/share/fonts/opentype"]:
-            found = list(Path(d).rglob("*.ttf")) if Path(d).exists() else []
-            if found:
-                return str(found[0])
+            if Path(d).exists():
+                found = list(Path(d).rglob("*.ttf"))
+                if found:
+                    return str(found[0])
         return None
 
     def _load_font(self, path: str | None, size: int) -> ImageFont.FreeTypeFont:
@@ -92,10 +88,13 @@ class SubtitleEngine:
             return ImageFont.load_default()
 
     def reshape(self, text: str) -> str:
+        """تحويل النص ليظهر بشكل صحيح (متصل ومن اليمين لليسار)"""
         try:
             if RESHAPER_OK:
+                # 1. ربط الحروف العربية ببعضها
                 text = arabic_reshaper.reshape(text)
             if BIDI_OK:
+                # 2. تصحيح اتجاه النص (RTL)
                 text = get_display(text)
             return text
         except Exception:
@@ -126,11 +125,13 @@ class SubtitleEngine:
         img  = Image.new("RGBA", (self.w, self.h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
 
-        # wrap على النص الأصلي ثم reshape كل سطر منفرداً
-        raw_lines     = self._wrap_arabic(text, font, int(self.w * 0.86))
+        # تقسيم النص الأصلي (خوارزمية مطورة للحفاظ على الاتصال)
+        raw_lines = self._wrap_arabic(text, font, int(self.w * 0.86))
+        
+        # تحويل كل سطر ليصبح بالشكل العربي الصحيح بعد التقسيم
         display_lines = [self.reshape(line) for line in raw_lines]
 
-        lh      = font.size + 24
+        lh      = font.size + 30
         total_h = len(display_lines) * lh
         start_y = int(self.h * ypos) - total_h // 2
 
@@ -140,9 +141,11 @@ class SubtitleEngine:
             lw = bb[2] - bb[0]
             lx = (self.w - lw) // 2
 
+            # رسم الوهج (Glow) والظل
             self._glow(img, line, font, lx, ly, gc)
             draw.text((lx + shd, ly + shd), line, font=font, fill=(0, 0, 0, 180))
 
+            # التحقق من الكلمات المميزة (Emphasis) في النص الأصلي للسطر
             orig_line = raw_lines[li]
             is_emp    = any(w in orig_line for w in emphasis if w)
 
@@ -158,19 +161,21 @@ class SubtitleEngine:
         return out
 
     def _wrap_arabic(self, text: str, font, max_w: int) -> list:
+        """تقسيم النص لأسطر مع الحفاظ على سلامة الحروف العربية"""
         words = text.split()
         if not words:
             return [""]
 
-        dummy = Image.new("RGB", (1, 1))
-        dd    = ImageDraw.Draw(dummy)
         lines, cur = [], []
 
         for word in words:
-            test        = " ".join(cur + [word])
-            test_shaped = self.reshape(test)
-            bb = dd.textbbox((0, 0), test_shaped, font=font)
-            if bb[2] - bb[0] <= max_w:
+            test_line = " ".join(cur + [word])
+            # نقيس العرض بعد التشكيل لأن الحروف المتصلة تأخذ مساحة مختلفة
+            shaped_test = self.reshape(test_line)
+            bb = font.getbbox(shaped_test)
+            width = bb[2] - bb[0]
+
+            if width <= max_w:
                 cur.append(word)
             else:
                 if cur:
