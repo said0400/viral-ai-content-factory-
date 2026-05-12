@@ -4,6 +4,7 @@ import os
 import struct
 import asyncio
 import mimetypes
+import subprocess
 import requests
 from pathlib import Path
 from dotenv import load_dotenv
@@ -24,12 +25,10 @@ class ElevenLabsTTS:
             "Content-Type": "application/json",
         }
 
-    # ── MAIN ENTRY ────────────────────────────────────────────────────
     def generate_audio(self, script: dict, output_path: str) -> str:
         text = self._build_text(script)
         print(f"📝 Text length: {len(text)} chars")
 
-        # 1. ElevenLabs
         try:
             print("🎙️ Trying ElevenLabs...")
             audio = self._elevenlabs(text)
@@ -39,7 +38,6 @@ class ElevenLabsTTS:
         except Exception as e:
             print(f"⚠️ ElevenLabs failed: {e}")
 
-        # 2. Gemini TTS مع prompt احترافي للعربية
         try:
             print("🚀 Trying Gemini TTS...")
             if self._gemini_tts(text, output_path):
@@ -48,7 +46,6 @@ class ElevenLabsTTS:
         except Exception as e:
             print(f"⚠️ Gemini TTS failed: {e}")
 
-        # 3. Edge TTS عربي
         try:
             print("🔁 Trying Edge TTS (Arabic)...")
             result = self._edge_tts(text, output_path)
@@ -61,7 +58,6 @@ class ElevenLabsTTS:
         print("⚠️ All TTS failed — generating silence")
         return self._silent_audio(output_path)
 
-    # ── GEMINI TTS (بالطريقة الصحيحة) ────────────────────────────────
     def _gemini_tts(self, text: str, output_path: str) -> bool:
         if not self.gemini_key:
             return False
@@ -72,7 +68,6 @@ class ElevenLabsTTS:
         client = genai.Client(api_key=self.gemini_key)
         model  = "gemini-3.1-flash-tts-preview"
 
-        # Prompt احترافي للمحتوى التحفيزي العربي
         prompt = f"""Read the following Arabic transcript based on the audio profile and director's note.
 
 # Audio Profile
@@ -83,9 +78,6 @@ Style: Dramatic and emotional. Pace: Measured with pauses for impact. Accent: Mo
 
 ## Scene:
 A cinematic short video for social media about success and ambition.
-
-## Sample Context:
-Deep resonant voice, emotional delivery, dramatic pauses between sentences, inspiring tone.
 
 ## Transcript:
 {text}"""
@@ -101,7 +93,7 @@ Deep resonant voice, emotional delivery, dramatic pauses between sentences, insp
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name="Umbriel"  # صوت عميق وتحفيزي
+                        voice_name="Umbriel"
                     )
                 )
             )
@@ -116,27 +108,41 @@ Deep resonant voice, emotional delivery, dramatic pauses between sentences, insp
             if chunk.parts is None:
                 continue
             if chunk.parts[0].inline_data and chunk.parts[0].inline_data.data:
-                inline_data = chunk.parts[0].inline_data
-                full_audio += inline_data.data
-                mime_type   = inline_data.mime_type
+                full_audio += chunk.parts[0].inline_data.data
+                mime_type   = chunk.parts[0].inline_data.mime_type
 
         print(f"  Gemini audio bytes: {len(full_audio)}")
 
         if full_audio and len(full_audio) > 1000:
-            # نفس طريقة Google الرسمية
-            ext = mimetypes.guess_extension(mime_type)
-            if ext is None:
-                wav = self._convert_to_wav(full_audio, mime_type)
-                self._save(output_path, wav)
+            params   = self._parse_mime(mime_type)
+            rate     = params["rate"]
+
+            raw_path = str(self.temp_dir / "gemini_raw.pcm")
+            with open(raw_path, "wb") as f:
+                f.write(full_audio)
+
+            result = subprocess.run([
+                "ffmpeg", "-y",
+                "-f", "s16le",
+                "-ar", str(rate),
+                "-ac", "1",
+                "-i", raw_path,
+                "-ar", "44100",
+                "-ac", "2",
+                "-b:a", "192k",
+                output_path
+            ], capture_output=True)
+
+            if result.returncode == 0:
+                return True
             else:
-                # تحويل لـ wav على كل حال لضمان التوافق
+                print(f"  ffmpeg error: {result.stderr.decode()[:200]}")
                 wav = self._convert_to_wav(full_audio, mime_type)
                 self._save(output_path, wav)
-            return True
+                return True
 
         return False
 
-    # ── ELEVENLABS ────────────────────────────────────────────────────
     def _elevenlabs(self, text: str):
         if not self.eleven_key or not self.voice_id:
             print("  ℹ️ ElevenLabs keys not set")
@@ -153,7 +159,6 @@ Deep resonant voice, emotional delivery, dramatic pauses between sentences, insp
         print(f"  ℹ️ ElevenLabs HTTP {r.status_code}: {r.text[:100]}")
         return None
 
-    # ── EDGE TTS ──────────────────────────────────────────────────────
     def _edge_tts(self, text: str, output_path: str) -> str:
         import edge_tts
 
@@ -176,13 +181,12 @@ Deep resonant voice, emotional delivery, dramatic pauses between sentences, insp
                 print(f"  ⚠️ {voice}: {e}")
         return None
 
-    # ── UTILS ─────────────────────────────────────────────────────────
     def _convert_to_wav(self, audio_data: bytes, mime_type: str) -> bytes:
-        params    = self._parse_mime(mime_type)
-        rate      = params["rate"]
-        bits      = params["bits_per_sample"]
-        num_ch    = 1
-        data_size = len(audio_data)
+        params      = self._parse_mime(mime_type)
+        rate        = params["rate"]
+        bits        = params["bits_per_sample"]
+        num_ch      = 1
+        data_size   = len(audio_data)
         block_align = num_ch * (bits // 8)
         byte_rate   = rate * block_align
         header = struct.pack(
@@ -228,7 +232,6 @@ Deep resonant voice, emotional delivery, dramatic pauses between sentences, insp
         return path
 
     def _silent_audio(self, output_path: str) -> str:
-        import subprocess
         subprocess.run([
             "ffmpeg", "-y", "-f", "lavfi",
             "-i", "anullsrc=r=44100:cl=stereo",
