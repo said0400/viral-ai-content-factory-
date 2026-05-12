@@ -46,8 +46,8 @@ def banner() -> None:
 
 def check_env() -> bool:
     ok = True
-    if not os.getenv("GEMINI_API_KEY"):
-        log("✗ GEMINI_API_KEY missing in .env", "err"); ok = False
+    if not os.getenv("GROQ_API_KEY"):
+    print("✗ GROQ_API_KEY missing in .env", "err"); ok = False
     if not os.getenv("ELEVENLABS_API_KEY"):
         log("✗ ELEVENLABS_API_KEY missing in .env", "err"); ok = False
     if not os.getenv("PEXELS_API_KEY"):
