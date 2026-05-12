@@ -1,5 +1,6 @@
-name: Generate Viral Arabic Video
+# .github/workflows/generate.yml
 
+name: Generate Viral Arabic Video
 on:
   workflow_dispatch:
     inputs:
@@ -16,7 +17,6 @@ on:
           - preview
           - tiktok
           - reels
-
   schedule:
     - cron: "0 8 * * *"
 
@@ -24,7 +24,6 @@ jobs:
   generate:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,7 +31,7 @@ jobs:
       - name: Install FFmpeg
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg fonts-noto fonts-arabeyes
           ffmpeg -version | head -1
 
       - name: Setup Python
@@ -47,7 +46,17 @@ jobs:
           pip install -r requirements.txt
 
       - name: Download Arabic fonts
-        run: python download_fonts.py
+        run: |
+          python download_fonts.py
+          if [ ! -f "engine/assets/fonts/Cairo-Black.ttf" ] && [ ! -f "engine/assets/fonts/NotoNaskhArabic-Bold.ttf" ]; then
+            echo "⚠️ Using system fonts as fallback..."
+            mkdir -p engine/assets/fonts
+            find /usr/share/fonts -name "*.ttf" | grep -i -E "arab|noto|cairo" | head -5 | while read f; do
+              cp "$f" engine/assets/fonts/ 2>/dev/null || true
+            done
+          fi
+          echo "Fonts available:"
+          ls engine/assets/fonts/
 
       - name: Verify setup
         run: |
@@ -64,17 +73,17 @@ jobs:
 
       - name: Generate video
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          ELEVENLABS_API_KEY:   ${{ secrets.ELEVENLABS_API_KEY }}
-          ELEVENLABS_VOICE_ID:  ${{ secrets.ELEVENLABS_VOICE_ID }}
-          PEXELS_API_KEY:       ${{ secrets.PEXELS_API_KEY }}
-          VIDEO_WIDTH:          "1080"
-          VIDEO_HEIGHT:         "1920"
-          VIDEO_FPS:            "30"
-          TEMP_DIR:             "./temp"
-          OUTPUT_DIR:           "./output"
-          DEFAULT_TOPIC:        "الطموح والنجاح"
+          GROQ_API_KEY:        ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY:      ${{ secrets.GEMINI_API_KEY }}
+          ELEVENLABS_API_KEY:  ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
+          PEXELS_API_KEY:      ${{ secrets.PEXELS_API_KEY }}
+          VIDEO_WIDTH:         "1080"
+          VIDEO_HEIGHT:        "1920"
+          VIDEO_FPS:           "30"
+          TEMP_DIR:            "./temp"
+          OUTPUT_DIR:          "./output"
+          DEFAULT_TOPIC:       "الطموح والنجاح"
         run: |
           python main.py \
             --topic "${{ github.event.inputs.topic || 'الطموح والنجاح' }}" \
