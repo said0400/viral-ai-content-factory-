@@ -33,6 +33,21 @@ class CinematicEditor:
         "empty road dramatic",
         "candle flame dark",
         "forest mist dark",
+        "desert sand wind",
+        "waterfall dramatic nature",
+        "lightning storm dramatic",
+        "crowd people silhouette",
+        "broken glass dramatic",
+        "clock time dramatic",
+        "bridge fog mysterious",
+        "snow falling slow",
+        "mirror reflection dark",
+        "door open dramatic light",
+        "hand reaching sky",
+        "shadow wall dramatic",
+        "old building abandoned",
+        "running person cinematic",
+        "moonlight night dramatic",
     ]
 
     ZOOM_MAP = {
@@ -69,11 +84,14 @@ class CinematicEditor:
         subtitle_data: list,
         output_path: str,
     ) -> str:
-        scenes       = script.get("scenes", [])
-        total_dur    = float(script.get("duration_estimate", 54.0))
+        scenes    = script.get("scenes", [])
+        total_dur = float(script.get("duration_estimate", 54.0))
+
+        # ── حذف الفيديوهات القديمة لضمان التنويع ──
+        self._clear_footage()
 
         print("    ► Fetching footage...")
-        raws = self._fetch_footage(scenes)
+        raws = self._fetch_footage(scenes, script)
 
         print("    ► Processing clips...")
         processed = self._process_clips(raws, scenes)
@@ -92,63 +110,114 @@ class CinematicEditor:
 
         return output_path
 
+    def _clear_footage(self):
+        """حذف الفيديوهات القديمة لضمان تحميل جديد كل مرة"""
+        for f in self.footage_dir.glob("*.mp4"):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+        print("    ► Cleared old footage cache")
+
     # ── FOOTAGE ─────────────────────────────────────────────────────────
 
-    def _fetch_footage(self, scenes: list) -> list:
+    def _fetch_footage(self, scenes: list, script: dict = None) -> list:
         used = set()
         clips = []
+
+        # استخدم visual_prompt من السيناريو إذا وُجد
         for i, scene in enumerate(scenes):
-            kw = self._pick_kw(scene, used)
+            visual_prompt = scene.get("visual_prompt", "")
+            if visual_prompt:
+                kw = self._clean_prompt(visual_prompt)
+            else:
+                kw = self._pick_kw(scene, used)
             used.add(kw)
             clips.append(self._download(kw, i))
         return clips
 
+    def _clean_prompt(self, prompt: str) -> str:
+        """تنظيف visual_prompt ليصبح query مناسب لـ Pexels"""
+        # أخذ أول 5 كلمات إنجليزية فقط
+        words = [w for w in prompt.split() if w.isascii()][:5]
+        return " ".join(words) if words else "cinematic dramatic"
+
     def _pick_kw(self, scene: dict, used: set) -> str:
         hints = {
-            "ألم": "smoke light dramatic",
-            "نجاح": "sunrise mountain golden",
-            "وحيد": "person walking alone",
-            "ليل": "urban night city lights",
-            "نار": "fire flame dramatic",
-            "أمل": "sunrise mountain golden",
-            "مطر": "rain window dark",
-            "قوة": "silhouette dramatic sunset",
-            "سماء": "stars night sky",
-            "طريق": "empty road dramatic",
+            "ألم":    "smoke light dramatic",
+            "نجاح":   "sunrise mountain golden",
+            "وحيد":   "person walking alone",
+            "ليل":    "urban night city lights",
+            "نار":    "fire flame dramatic",
+            "أمل":    "sunrise mountain golden",
+            "مطر":    "rain window dark",
+            "قوة":    "silhouette dramatic sunset",
+            "سماء":   "stars night sky",
+            "طريق":   "empty road dramatic",
+            "خوف":    "shadow wall dramatic",
+            "حلم":    "clouds sky dramatic",
+            "وقت":    "clock time dramatic",
+            "حقيقة":  "mirror reflection dark",
+            "صمت":    "empty room dark",
+            "ذاكرة":  "old building abandoned",
+            "قرار":   "door open dramatic light",
+            "إرادة":  "running person cinematic",
+            "فشل":    "broken glass dramatic",
+            "نور":    "light beam dramatic",
         }
-        text = scene.get("text", "")
+        text  = scene.get("text", "")
+        avail = [k for k in self.KEYWORDS if k not in used]
+
         for hint, kw in hints.items():
             if hint in text and kw not in used:
                 return kw
-        avail = [k for k in self.KEYWORDS if k not in used]
+
         return random.choice(avail) if avail else random.choice(self.KEYWORDS)
 
     def _download(self, keyword: str, idx: int) -> str:
         out = str(self.footage_dir / f"footage_{idx:03d}.mp4")
-        if os.path.exists(out) and os.path.getsize(out) > 10000:
-            return out
+
         if not self.pexels_key:
             return self._placeholder(idx)
+
         try:
+            # page عشوائي لضمان تنويع النتائج
+            page = random.randint(1, 3)
             r = requests.get(
                 "https://api.pexels.com/videos/search",
                 headers={"Authorization": self.pexels_key},
-                params={"query": keyword, "per_page": 5, "orientation": "portrait"},
+                params={
+                    "query":       keyword,
+                    "per_page":    10,
+                    "page":        page,
+                    "orientation": "portrait",
+                },
                 timeout=15,
             )
             r.raise_for_status()
             videos = r.json().get("videos", [])
+
+            if not videos:
+                # جرب بدون portrait
+                r2 = requests.get(
+                    "https://api.pexels.com/videos/search",
+                    headers={"Authorization": self.pexels_key},
+                    params={"query": keyword, "per_page": 10, "page": page},
+                    timeout=15,
+                )
+                videos = r2.json().get("videos", []) if r2.ok else []
+
             if not videos:
                 return self._placeholder(idx)
 
-            video = random.choice(videos[:3])
+            # اختر فيديو عشوائي من النتائج
+            video = random.choice(videos)
             files = video.get("video_files", [])
 
-            # اختار portrait أو أقرب
             target = None
             for vf in files:
-                vw = vf.get("width", 0)
-                vh = vf.get("height", 0)
+                vw = vf.get("width",   0)
+                vh = vf.get("height",  0)
                 q  = vf.get("quality", "")
                 if vh >= vw and q in ("hd", "sd"):
                     target = vf
@@ -169,14 +238,18 @@ class CinematicEditor:
                 for chunk in dl.iter_content(8192):
                     f.write(chunk)
             return out
+
         except Exception as e:
             print(f"      Pexels failed '{keyword}': {e}")
             return self._placeholder(idx)
 
     def _placeholder(self, idx: int) -> str:
-        """Dark animated gradient placeholder."""
         out = str(self.footage_dir / f"ph_{idx:03d}.mp4")
-        colors = ["0x0a0a1a", "0x0d0d1e", "0x080818", "0x0a0a0a", "0x05050f"]
+        colors = [
+            "0x0a0a1a", "0x0d0d1e", "0x080818",
+            "0x0a0a0a", "0x05050f", "0x100a0a",
+            "0x0a100a", "0x0a0a10",
+        ]
         c = colors[idx % len(colors)]
         result = subprocess.run(
             [
@@ -189,7 +262,7 @@ class CinematicEditor:
             ],
             capture_output=True,
         )
-        if result.returncode != 0 or not os.path.exists(out):
+        if result.returncode != 0:
             subprocess.run(
                 [
                     "ffmpeg", "-y",
@@ -212,9 +285,9 @@ class CinematicEditor:
             dur  = scene.get("duration", 3.0) + scene.get("pause_after", 0.3)
             zoom = self.ZOOM_MAP.get(st, "slow_zoom_in")
 
-            sc  = str(self.clips_dir / f"sc_{i:03d}.mp4")
-            tr  = str(self.clips_dir / f"tr_{i:03d}.mp4")
-            zm  = str(self.clips_dir / f"zm_{i:03d}.mp4")
+            sc = str(self.clips_dir / f"sc_{i:03d}.mp4")
+            tr = str(self.clips_dir / f"tr_{i:03d}.mp4")
+            zm = str(self.clips_dir / f"zm_{i:03d}.mp4")
 
             self.fx.scale_and_crop(raw, sc)
             self.fx.trim_clip(sc, tr, 0.0, dur)
@@ -271,7 +344,7 @@ class CinematicEditor:
         t = 0.0
 
         for i, (_, scene) in enumerate(sub_data):
-            dur   = scene.get("duration", 3.0)
+            dur   = scene.get("duration",    3.0)
             pause = scene.get("pause_after", 0.3)
             t_end = t + dur
             nxt   = f"vs{i}"
