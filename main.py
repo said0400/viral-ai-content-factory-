@@ -20,6 +20,7 @@ from engine.ai.gemini_writer        import GeminiWriter
 from engine.voice.elevenlabs_tts    import ElevenLabsTTS
 from engine.voice.breathing_engine  import BreathingEngine
 from engine.voice.audio_fx          import AudioFX
+from engine.voice.music_engine      import MusicEngine
 from engine.video.cinematic_editor  import CinematicEditor
 from engine.video.subtitle_engine   import SubtitleEngine
 from engine.render.ffmpeg_builder   import FFmpegBuilder
@@ -27,12 +28,12 @@ from engine.render.ffmpeg_builder   import FFmpegBuilder
 
 def log(msg: str, kind: str = "info") -> None:
     colors = {
-        "info":    "\033[97m",
-        "ok":      "\033[92m",
-        "warn":    "\033[93m",
-        "err":     "\033[91m",
-        "cyan":    "\033[96m",
-        "bold":    "\033[1m",
+        "info":  "\033[97m",
+        "ok":    "\033[92m",
+        "warn":  "\033[93m",
+        "err":   "\033[91m",
+        "cyan":  "\033[96m",
+        "bold":  "\033[1m",
     }
     print(f"{colors.get(kind, '')}{msg}\033[0m")
 
@@ -64,12 +65,13 @@ def generate_video(topic: str, output_dir: str, preset: str = "tiktok") -> str:
     tmp = Path(os.getenv("TEMP_DIR", "./temp"))
     tmp.mkdir(parents=True, exist_ok=True)
 
-    writer   = GeminiWriter()
-    tts      = ElevenLabsTTS()
-    breath   = BreathingEngine()
-    fx       = AudioFX()
-    editor   = CinematicEditor()
-    renderer = FFmpegBuilder()
+    writer        = GeminiWriter()
+    tts           = ElevenLabsTTS()
+    breath        = BreathingEngine()
+    fx            = AudioFX()
+    music_engine  = MusicEngine()
+    editor        = CinematicEditor()
+    renderer      = FFmpegBuilder()
 
     # ── 1: Script ────────────────────────────────────────────────────
     log("\n[1/6] Generating cinematic script...", "cyan")
@@ -78,7 +80,7 @@ def generate_video(topic: str, output_dir: str, preset: str = "tiktok") -> str:
     log(f"  Hook: {script['hook'][:55]}", "info")
 
     # ── 2: Voice ─────────────────────────────────────────────────────
-    log("\n[2/6] Generating cinematic voice (ElevenLabs)...", "cyan")
+    log("\n[2/6] Generating cinematic voice...", "cyan")
     raw_voice = str(tmp / "voice_raw.mp3")
     tts.generate_audio(script, raw_voice)
 
@@ -96,17 +98,17 @@ def generate_video(topic: str, output_dir: str, preset: str = "tiktok") -> str:
     log("\n[3/6] Mixing audio tracks...", "cyan")
     final_audio = str(tmp / "final_audio.mp3")
     total_dur   = script["duration_estimate"]
+    mood        = script.get("music_mood", "motivational")
 
-    music_dir   = Path("engine/assets/music")
-    music_files = list(music_dir.glob("*.mp3")) + list(music_dir.glob("*.wav"))
+    log(f"  🎵 Mood: {mood}", "info")
+    music_file = music_engine.get_music(mood, total_dur)
 
-    if music_files:
-        music = str(random.choice(music_files))
+    if music_file:
         proc_music = str(tmp / "music.mp3")
-        fx.process_music(music, proc_music, 0.20)
+        fx.process_music(music_file, proc_music, 0.20)
 
-        sfx_dir   = Path("engine/assets/sfx")
-        sfx_files = list(sfx_dir.glob("*.mp3")) + list(sfx_dir.glob("*.wav"))
+        sfx_dir    = Path("engine/assets/sfx")
+        sfx_files  = list(sfx_dir.glob("*.mp3")) + list(sfx_dir.glob("*.wav"))
         sfx_tracks = []
         if sfx_files:
             t = 0.0
@@ -115,15 +117,15 @@ def generate_video(topic: str, output_dir: str, preset: str = "tiktok") -> str:
                 t += scene.get("duration", 3.0) + scene.get("pause_after", 0.3)
 
         fx.mix_audio_tracks(proc_voice, proc_music, sfx_tracks, final_audio, total_dur)
-        log("  ✓ Voice + music + SFX mixed", "ok")
+        log(f"  ✓ Voice + [{mood}] music mixed", "ok")
     else:
         shutil.copy(proc_voice, final_audio)
-        log("  ✓ Voice only (add MP3s to engine/assets/music/ for music)", "warn")
+        log("  ✓ Voice only (no music found)", "warn")
 
     # ── 4: Subtitles ─────────────────────────────────────────────────
     log("\n[4/6] Rendering Arabic subtitles (PIL)...", "cyan")
-    sub_engine   = SubtitleEngine(
-        int(os.getenv("VIDEO_WIDTH", "1080")),
+    sub_engine = SubtitleEngine(
+        int(os.getenv("VIDEO_WIDTH",  "1080")),
         int(os.getenv("VIDEO_HEIGHT", "1920")),
     )
     subtitle_data = sub_engine.render_all_scenes(script)
@@ -166,7 +168,7 @@ def main():
     parser = argparse.ArgumentParser(description="Viral AI Content Factory")
     parser.add_argument("--topic",      type=str, default=os.getenv("DEFAULT_TOPIC", "الطموح والنجاح"))
     parser.add_argument("--output",     type=str, default=os.getenv("OUTPUT_DIR", "./output"))
-    parser.add_argument("--preset",     type=str, choices=["tiktok","reels","preview"], default="tiktok")
+    parser.add_argument("--preset",     type=str, choices=["tiktok", "reels", "preview"], default="tiktok")
     parser.add_argument("--no-cleanup", action="store_true")
     parser.add_argument("--batch",      type=str, nargs="+")
     args = parser.parse_args()
