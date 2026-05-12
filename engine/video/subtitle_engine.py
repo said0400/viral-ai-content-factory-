@@ -1,9 +1,12 @@
 """
 Subtitle Engine
-arabic_reshaper + bidi + Pillow → PNG overlays → FFmpeg
+Arabic RTL Safe
+Pillow + arabic_reshaper + bidi
+PNG Overlay Generator for FFmpeg
 """
 
 import os
+from pathlib import Path
 
 try:
     import arabic_reshaper
@@ -15,119 +18,146 @@ try:
     from bidi.algorithm import get_display
     BIDI_OK = True
 except ImportError:
+
     try:
         from python_bidi.algorithm import get_display
         BIDI_OK = True
+
     except ImportError:
+
         BIDI_OK = False
 
-        def get_display(t):
-            return t
+        def get_display(text):
+            return text
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
-from pathlib import Path
+from PIL import (
+    Image,
+    ImageDraw,
+    ImageFilter,
+    ImageFont,
+)
 
 
 class SubtitleEngine:
 
     FONT_PATHS = [
-        "engine/assets/fonts/Cairo-Black.ttf",
+
+        # الأفضل أولاً
         "engine/assets/fonts/Cairo.ttf",
+
         "engine/assets/fonts/Tajawal-ExtraBold.ttf",
+
         "engine/assets/fonts/Changa.ttf",
+
         "engine/assets/fonts/NotoNaskhArabic.ttf",
-        "engine/assets/fonts/NotoNaskhArabic-Bold.ttf",
     ]
 
     SYSTEM_FONTS = [
-        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf",
-        "/usr/share/fonts/truetype/arabeyes/ae_AlBattar.ttf",
-        "/usr/share/fonts/opentype/noto/NotoNaskhArabic-Regular.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+
+        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
 
-    def __init__(self, video_width: int = 1080, video_height: int = 1920):
+    def __init__(
+        self,
+        video_width: int = 1080,
+        video_height: int = 1920
+    ):
 
         self.w = video_width
         self.h = video_height
 
-        self.temp_dir = Path(os.getenv("TEMP_DIR", "./temp"))
-        self.sub_dir = self.temp_dir / "subtitles"
+        self.temp_dir = Path(
+            os.getenv("TEMP_DIR", "./temp")
+        )
 
-        self.sub_dir.mkdir(parents=True, exist_ok=True)
+        self.sub_dir = (
+            self.temp_dir / "subtitles"
+        )
 
-        font_path = self._find_font()
+        self.sub_dir.mkdir(
+            parents=True,
+            exist_ok=True
+        )
 
-        print(f"  🔤 Using font: {font_path}")
+        self.font_path = self._find_font()
 
-        # نفس المنطق الأصلي للأحجام
-        self.font_lg = self._load_font(font_path, 84)
-        self.font_md = self._load_font(font_path, 68)
-        self.font_sm = self._load_font(font_path, 54)
+        print(f"🔤 Using font: {self.font_path}")
 
-    def _find_font(self) -> str | None:
+        self.font_lg = self._load_font(
+            self.font_path,
+            84
+        )
 
-        for p in self.FONT_PATHS + self.SYSTEM_FONTS:
-            if os.path.exists(p):
-                return p
+        self.font_md = self._load_font(
+            self.font_path,
+            68
+        )
 
-        fonts_dir = Path("engine/assets/fonts")
+        self.font_sm = self._load_font(
+            self.font_path,
+            54
+        )
 
-        if fonts_dir.exists():
-            ttfs = list(fonts_dir.glob("*.ttf"))
+    def _find_font(self):
 
-            if ttfs:
-                return str(ttfs[0])
+        for path in (
+            self.FONT_PATHS + self.SYSTEM_FONTS
+        ):
 
-        for d in [
-            "/usr/share/fonts/truetype",
-            "/usr/share/fonts/opentype",
-        ]:
-
-            if Path(d).exists():
-
-                found = list(Path(d).rglob("*.ttf"))
-
-                if found:
-                    return str(found[0])
+            if os.path.exists(path):
+                return path
 
         return None
 
     def _load_font(
         self,
-        path: str | None,
-        size: int
-    ) -> ImageFont.FreeTypeFont:
+        path,
+        size
+    ):
 
-        if path and os.path.exists(path):
+        try:
 
-            try:
-                return ImageFont.truetype(path, size)
+            if path and os.path.exists(path):
 
-            except Exception as e:
-                print(f"⚠️ Font load error: {e}")
+                return ImageFont.truetype(
+                    path,
+                    size
+                )
 
-        print("⚠️ Using default font")
+        except Exception as e:
+
+            print(f"⚠️ Font load error: {e}")
+
+        print("⚠️ Using default Pillow font")
 
         return ImageFont.load_default()
 
-    def reshape(self, text: str) -> str:
+    def reshape(
+        self,
+        text: str
+    ) -> str:
+
         """
         إصلاح النص العربي:
         - ربط الحروف
-        - تصحيح الاتجاه RTL
+        - RTL
         """
 
         try:
 
+            result = text
+
             if RESHAPER_OK:
-                text = arabic_reshaper.reshape(text)
+                result = arabic_reshaper.reshape(result)
 
             if BIDI_OK:
-                text = get_display(text)
+                result = get_display(result)
 
-            return text
+            return result
 
         except Exception as e:
 
@@ -135,44 +165,73 @@ class SubtitleEngine:
 
             return text
 
-    def render_all_scenes(self, script: dict) -> list:
+    def render_all_scenes(
+        self,
+        script: dict
+    ) -> list:
 
         results = []
 
-        for i, scene in enumerate(script.get("scenes", [])):
+        for i, scene in enumerate(
+            script.get("scenes", [])
+        ):
 
-            png = self._render_png(scene, i)
+            png = self._render_png(
+                scene,
+                i
+            )
 
-            results.append((png, scene))
+            results.append(
+                (png, scene)
+            )
 
         return results
 
-    def _render_png(self, scene: dict, idx: int) -> str:
+    def _render_png(
+        self,
+        scene: dict,
+        idx: int
+    ) -> str:
 
-        text = scene.get("text", "")
-        s_type = scene.get("type", "main")
+        text = scene.get(
+            "text",
+            ""
+        )
+
+        scene_type = scene.get(
+            "type",
+            "main"
+        )
 
         emphasis = [
+
             e.get("word", "")
-            for e in scene.get("emphasis", [])
+
+            for e in scene.get(
+                "emphasis",
+                []
+            )
         ]
 
-        out = str(
+        output = str(
             self.sub_dir / f"sub_{idx:03d}.png"
         )
 
-        cfg = self._style(s_type)
+        cfg = self._style(scene_type)
 
         font = cfg["font"]
-        tc = cfg["text_color"]
-        gc = cfg["glow_color"]
+
+        text_color = cfg["text_color"]
+
+        glow_color = cfg["glow_color"]
 
         ypos = cfg["y_pos"]
 
-        sw = cfg["stroke_w"]
-        sc = cfg["stroke_c"]
+        stroke_width = cfg["stroke_w"]
 
-        shd = cfg["shadow"]
+        stroke_color = cfg["stroke_c"]
+
+        shadow = cfg["shadow"]
 
         img = Image.new(
             "RGBA",
@@ -182,106 +241,126 @@ class SubtitleEngine:
 
         draw = ImageDraw.Draw(img)
 
-        # تقسيم النص العربي بشكل صحيح
+        # تقسيم النص قبل RTL
         raw_lines = self._wrap_arabic(
             text,
             font,
             int(self.w * 0.86)
         )
 
-        # إصلاح RTL بعد التقسيم
-        display_lines = []
+        # ثم إصلاح العربية
+        display_lines = [
 
-        for line in raw_lines:
+            self.reshape(line)
 
-            fixed_line = self.reshape(line)
+            for line in raw_lines
+        ]
 
-            display_lines.append(fixed_line)
+        line_height = font.size + 30
 
-        lh = font.size + 30
+        total_height = (
+            len(display_lines)
+            * line_height
+        )
 
-        total_h = len(display_lines) * lh
+        start_y = (
+            int(self.h * ypos)
+            - total_height // 2
+        )
 
-        start_y = int(self.h * ypos) - total_h // 2
+        for i, line in enumerate(display_lines):
 
-        for li, line in enumerate(display_lines):
+            y = start_y + (
+                i * line_height
+            )
 
-            ly = start_y + li * lh
-
-            bb = draw.textbbox(
+            bbox = draw.textbbox(
                 (0, 0),
                 line,
                 font=font
             )
 
-            lw = bb[2] - bb[0]
+            width = bbox[2] - bbox[0]
 
-            lx = (self.w - lw) // 2
+            x = (
+                self.w - width
+            ) // 2
 
             # Glow
             self._glow(
                 img,
                 line,
                 font,
-                lx,
-                ly,
-                gc
+                x,
+                y,
+                glow_color
             )
 
             # Shadow
             draw.text(
-                (lx + shd, ly + shd),
+                (x + shadow, y + shadow),
                 line,
                 font=font,
                 fill=(0, 0, 0, 180),
             )
 
-            orig_line = (
-                raw_lines[li]
-                if li < len(raw_lines)
+            original_line = (
+                raw_lines[i]
+                if i < len(raw_lines)
                 else ""
             )
 
-            is_emp = any(
-                w in orig_line
-                for w in emphasis
-                if w
+            is_emphasis = any(
+
+                word in original_line
+
+                for word in emphasis
             )
 
-            if is_emp:
+            if is_emphasis:
 
                 self._highlight(
                     draw,
                     line,
                     font,
-                    lx,
-                    ly
+                    x,
+                    y
                 )
 
             else:
 
                 draw.text(
-                    (lx, ly),
+
+                    (x, y),
+
                     line,
+
                     font=font,
-                    fill=tc,
-                    stroke_width=sw,
-                    stroke_fill=sc,
+
+                    fill=text_color,
+
+                    stroke_width=stroke_width,
+
+                    stroke_fill=stroke_color,
                 )
 
-        img.save(out, "PNG")
+        img.save(
+            output,
+            "PNG"
+        )
 
-        return out
+        return output
 
     def _wrap_arabic(
         self,
-        text: str,
+        text,
         font,
-        max_w: int
-    ) -> list:
+        max_width
+    ):
 
         """
-        تقسيم النص العربي بدون تقطيع الحروف
+        تقسيم النص العربي
+        بدون تقطيع الحروف
         """
 
         words = text.split()
@@ -291,24 +370,34 @@ class SubtitleEngine:
 
         lines = []
 
-        current_line = ""
+        current = ""
 
-        dummy_img = Image.new("RGB", (10, 10))
-        dummy_draw = ImageDraw.Draw(dummy_img)
+        test_img = Image.new(
+            "RGB",
+            (10, 10)
+        )
+
+        test_draw = ImageDraw.Draw(test_img)
 
         for word in words:
 
-            test_line = f"{current_line} {word}".strip()
+            candidate = (
+                f"{current} {word}"
+            ).strip()
 
-            shaped = test_line
+            shaped = candidate
 
             if RESHAPER_OK:
-                shaped = arabic_reshaper.reshape(shaped)
+                shaped = arabic_reshaper.reshape(
+                    shaped
+                )
 
             if BIDI_OK:
-                shaped = get_display(shaped)
+                shaped = get_display(
+                    shaped
+                )
 
-            bbox = dummy_draw.textbbox(
+            bbox = test_draw.textbbox(
                 (0, 0),
                 shaped,
                 font=font
@@ -316,19 +405,19 @@ class SubtitleEngine:
 
             width = bbox[2] - bbox[0]
 
-            if width <= max_w:
+            if width <= max_width:
 
-                current_line = test_line
+                current = candidate
 
             else:
 
-                if current_line:
-                    lines.append(current_line)
+                if current:
+                    lines.append(current)
 
-                current_line = word
+                current = word
 
-        if current_line:
-            lines.append(current_line)
+        if current:
+            lines.append(current)
 
         return lines
 
@@ -342,51 +431,53 @@ class SubtitleEngine:
         color
     ):
 
-        glay = Image.new(
+        glow_layer = Image.new(
             "RGBA",
             img.size,
             (0, 0, 0, 0)
         )
 
-        gd = ImageDraw.Draw(glay)
+        glow_draw = ImageDraw.Draw(
+            glow_layer
+        )
 
         r, g, b = color[:3]
 
-        for off in [3, 6, 9]:
+        for offset in [3, 6, 9]:
 
-            gd.text(
-                (x - off, y),
+            glow_draw.text(
+                (x - offset, y),
                 text,
                 font=font,
                 fill=(r, g, b, 30)
             )
 
-            gd.text(
-                (x + off, y),
+            glow_draw.text(
+                (x + offset, y),
                 text,
                 font=font,
                 fill=(r, g, b, 30)
             )
 
-            gd.text(
-                (x, y - off),
+            glow_draw.text(
+                (x, y - offset),
                 text,
                 font=font,
                 fill=(r, g, b, 30)
             )
 
-            gd.text(
-                (x, y + off),
+            glow_draw.text(
+                (x, y + offset),
                 text,
                 font=font,
                 fill=(r, g, b, 30)
             )
 
-        img.alpha_composite(
-            glay.filter(
-                ImageFilter.GaussianBlur(12)
-            )
+        blurred = glow_layer.filter(
+            ImageFilter.GaussianBlur(12)
         )
+
+        img.alpha_composite(blurred)
 
     def _highlight(
         self,
@@ -397,97 +488,156 @@ class SubtitleEngine:
         y
     ):
 
-        bb = draw.textbbox(
+        bbox = draw.textbbox(
             (x, y),
             text,
             font=font
         )
 
-        pad = 10
+        padding = 10
 
         draw.rounded_rectangle(
+
             [
-                bb[0] - pad,
-                bb[1] - pad,
-                bb[2] + pad,
-                bb[3] + pad,
+
+                bbox[0] - padding,
+                bbox[1] - padding,
+
+                bbox[2] + padding,
+                bbox[3] + padding,
             ],
+
             radius=8,
+
             fill=(255, 200, 0, 210),
         )
 
         draw.text(
+
             (x, y),
+
             text,
+
             font=font,
+
             fill=(15, 15, 15, 255),
+
             stroke_width=1,
+
             stroke_fill=(0, 0, 0, 180),
         )
 
-    def _style(self, t: str) -> dict:
+    def _style(
+        self,
+        t: str
+    ) -> dict:
 
         base = {
 
             "hook": dict(
+
                 font=self.font_lg,
+
                 text_color=(255, 255, 255, 255),
+
                 glow_color=(220, 30, 30),
+
                 y_pos=0.44,
+
                 stroke_w=3,
+
                 stroke_c=(0, 0, 0, 255),
-                shadow=4
+
+                shadow=4,
             ),
 
             "build": dict(
+
                 font=self.font_md,
+
                 text_color=(240, 240, 240, 255),
+
                 glow_color=(80, 80, 220),
+
                 y_pos=0.55,
+
                 stroke_w=2,
+
                 stroke_c=(0, 0, 0, 255),
-                shadow=3
+
+                shadow=3,
             ),
 
             "peak": dict(
+
                 font=self.font_lg,
+
                 text_color=(255, 215, 0, 255),
+
                 glow_color=(255, 180, 0),
+
                 y_pos=0.50,
+
                 stroke_w=3,
+
                 stroke_c=(80, 40, 0, 255),
-                shadow=5
+
+                shadow=5,
             ),
 
             "resolution": dict(
+
                 font=self.font_md,
+
                 text_color=(200, 230, 255, 255),
+
                 glow_color=(40, 130, 255),
+
                 y_pos=0.55,
+
                 stroke_w=2,
+
                 stroke_c=(0, 0, 0, 255),
-                shadow=3
+
+                shadow=3,
             ),
 
             "cta": dict(
+
                 font=self.font_md,
+
                 text_color=(255, 255, 255, 255),
+
                 glow_color=(255, 255, 255),
+
                 y_pos=0.73,
+
                 stroke_w=2,
+
                 stroke_c=(0, 0, 0, 255),
-                shadow=3
+
+                shadow=3,
             ),
 
             "main": dict(
+
                 font=self.font_md,
+
                 text_color=(255, 255, 255, 255),
+
                 glow_color=(180, 180, 180),
+
                 y_pos=0.55,
+
                 stroke_w=2,
+
                 stroke_c=(0, 0, 0, 255),
-                shadow=3
+
+                shadow=3,
             ),
         }
 
-        return base.get(t, base["main"])
+        return base.get(
+            t,
+            base["main"]
+        )
