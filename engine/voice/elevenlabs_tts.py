@@ -1,240 +1,333 @@
-# engine/voice/elevenlabs_tts.py
+"""
+🎙️ ElevenLabs TTS Engine — احتياطي عالي الجودة
+═══════════════════════════════════════════════════════════════
+محرك TTS احترافي يستخدم ElevenLabs API:
+  ✓ جودة صوت ممتازة (الأفضل عالمياً)
+  ✓ يدعم العربية بـ eleven_multilingual_v2
+  ✓ تحكم كامل بإعدادات الصوت
+  ✓ Retry تلقائي عند الفشل
+  ⚠ مدفوع (10K حرف مجاني/شهر)
+
+ضع في: engine/voice/elevenlabs_tts.py
+═══════════════════════════════════════════════════════════════
+"""
 
 import os
-import struct
-import asyncio
-import mimetypes
+import time
+import logging
 import subprocess
 import requests
 from pathlib import Path
+from typing import Optional
+
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
+
 
 class ElevenLabsTTS:
+    """محرك ElevenLabs TTS عالي الجودة."""
+
     BASE_URL = "https://api.elevenlabs.io/v1"
 
+    # موديلات تدعم العربية
+    ARABIC_MODELS = [
+        "eleven_multilingual_v2",   # الأفضل للعربية
+        "eleven_turbo_v2_5",        # سريع + يدعم العربية
+        "eleven_flash_v2_5",        # الأسرع
+    ]
+
+    # أصوات افتراضية تعمل مع العربية (Voice IDs عامة)
+    DEFAULT_ARABIC_VOICES = {
+        "male_deep":   "pNInz6obpgDQGcFmaJgB",   # Adam
+        "male_strong": "ErXwobaYiN019PkySvjV",   # Antoni
+        "female_warm": "EXAVITQu4vr4xnSDxMaL",   # Bella
+        "female_calm": "21m00Tcm4TlvDq8ikWAM",   # Rachel
+    }
+
+    MAX_RETRIES = 3
+    RETRY_DELAY = 2
+
+    # ════════════════════════════════════════════════════════════════
     def __init__(self):
-        self.eleven_key = os.getenv("ELEVENLABS_API_KEY")
-        self.gemini_key = os.getenv("GEMINI_API_KEY")
-        self.voice_id   = os.getenv("ELEVENLABS_VOICE_ID")
-        self.temp_dir   = Path(os.getenv("TEMP_DIR", "./temp"))
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
-        self.headers = {
-            "xi-api-key": self.eleven_key,
-            "Content-Type": "application/json",
-        }
-
-    def generate_audio(self, script: dict, output_path: str) -> str:
-        text = self._build_text(script)
-        print(f"📝 Text length: {len(text)} chars")
-
-        try:
-            print("🎙️ Trying ElevenLabs...")
-            audio = self._elevenlabs(text)
-            if audio and len(audio) > 1000:
-                print(f"✓ ElevenLabs success ({len(audio)} bytes)")
-                return self._save(output_path, audio)
-        except Exception as e:
-            print(f"⚠️ ElevenLabs failed: {e}")
-
-        try:
-            print("🚀 Trying Gemini TTS...")
-            if self._gemini_tts(text, output_path):
-                print("✓ Gemini TTS success")
-                return output_path
-        except Exception as e:
-            print(f"⚠️ Gemini TTS failed: {e}")
-
-        try:
-            print("🔁 Trying Edge TTS (Arabic)...")
-            result = self._edge_tts(text, output_path)
-            if result and Path(result).exists() and Path(result).stat().st_size > 1000:
-                print("✓ Edge TTS success")
-                return result
-        except Exception as e:
-            print(f"⚠️ Edge TTS failed: {e}")
-
-        print("⚠️ All TTS failed — generating silence")
-        return self._silent_audio(output_path)
-
-    def _gemini_tts(self, text: str, output_path: str) -> bool:
-        if not self.gemini_key:
-            return False
-
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(api_key=self.gemini_key)
-        model  = "gemini-3.1-flash-tts-preview"
-
-        prompt = f"""Read the following Arabic transcript based on the audio profile and director's note.
-
-# Audio Profile
-A powerful and inspiring Arabic motivational narrator.
-
-# Director's note
-Style: Dramatic and emotional. Pace: Measured with pauses for impact. Accent: Modern Standard Arabic (Fusha).
-
-## Scene:
-A cinematic short video for social media about success and ambition.
-
-## Transcript:
-{text}"""
-
-        contents = [types.Content(
-            role="user",
-            parts=[types.Part.from_text(text=prompt)]
-        )]
-
-        config = types.GenerateContentConfig(
-            temperature=1,
-            response_modalities=["audio"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name="Umbriel"
-                    )
-                )
+        """تهيئة ElevenLabs."""
+        self.api_key = os.getenv("ELEVENLABS_API_KEY")
+        if not self.api_key:
+            raise ValueError(
+                "❌ ELEVENLABS_API_KEY غير موجود في البيئة\n"
+                "   احصل عليه من: https://elevenlabs.io/app/settings/api-keys"
             )
+
+        # الصوت الافتراضي
+        self.voice_id = (
+            os.getenv("ELEVENLABS_VOICE_ID")
+            or self.DEFAULT_ARABIC_VOICES["male_deep"]
         )
 
-        full_audio = b""
-        mime_type  = "audio/L16;rate=24000"
+        # الموديل
+        self.model_id = os.getenv(
+            "ELEVENLABS_MODEL", "eleven_multilingual_v2"
+        )
 
-        for chunk in client.models.generate_content_stream(
-            model=model, contents=contents, config=config
-        ):
-            if chunk.parts is None:
-                continue
-            if chunk.parts[0].inline_data and chunk.parts[0].inline_data.data:
-                full_audio += chunk.parts[0].inline_data.data
-                mime_type   = chunk.parts[0].inline_data.mime_type
+        # إعدادات الصوت
+        self.stability = float(os.getenv("ELEVENLABS_STABILITY", "0.5"))
+        self.similarity = float(os.getenv("ELEVENLABS_SIMILARITY", "0.75"))
+        self.style = float(os.getenv("ELEVENLABS_STYLE", "0.5"))
+        self.use_speaker_boost = (
+            os.getenv("ELEVENLABS_SPEAKER_BOOST", "true").lower() == "true"
+        )
 
-        print(f"  Gemini audio bytes: {len(full_audio)}")
+        self.headers = {
+            "xi-api-key": self.api_key,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        }
 
-        if full_audio and len(full_audio) > 1000:
-            params   = self._parse_mime(mime_type)
-            rate     = params["rate"]
+        self.temp_dir = Path(os.getenv("TEMP_DIR", "./temp"))
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
 
-            raw_path = str(self.temp_dir / "gemini_raw.pcm")
-            with open(raw_path, "wb") as f:
-                f.write(full_audio)
+        logger.info(
+            f"✓ ElevenLabs initialized | "
+            f"Voice: {self.voice_id[:8]}... | Model: {self.model_id}"
+        )
 
-            result = subprocess.run([
-                "ffmpeg", "-y",
-                "-f", "s16le",
-                "-ar", str(rate),
-                "-ac", "1",
-                "-i", raw_path,
-                "-ar", "44100",
-                "-ac", "2",
-                "-b:a", "192k",
-                output_path
-            ], capture_output=True)
+    # ════════════════════════════════════════════════════════════════
+    #                    الدالة الرئيسية
+    # ════════════════════════════════════════════════════════════════
+    def generate_audio(self, script: dict, output_path: str) -> str:
+        """
+        توليد صوت كامل من السكربت.
 
-            if result.returncode == 0:
-                return True
-            else:
-                print(f"  ffmpeg error: {result.stderr.decode()[:200]}")
-                wav = self._convert_to_wav(full_audio, mime_type)
-                self._save(output_path, wav)
-                return True
+        Args:
+            script: السكربت من ScriptWriter
+            output_path: مسار حفظ الملف الصوتي (.mp3)
 
-        return False
+        Returns:
+            مسار الملف الصوتي الناتج
+        """
+        text = self._build_full_text(script)
 
-    def _elevenlabs(self, text: str):
-        if not self.eleven_key or not self.voice_id:
-            print("  ℹ️ ElevenLabs keys not set")
-            return None
+        if not text.strip():
+            logger.error("❌ النص فارغ!")
+            return self._silence(output_path)
+
+        logger.info(f"🎙️ ElevenLabs | Text: {len(text)} chars")
+
+        # محاولة التوليد مع retry
+        audio_data = self._generate_with_retry(text)
+
+        if audio_data and len(audio_data) > 1000:
+            with open(output_path, "wb") as f:
+                f.write(audio_data)
+            logger.info(f"✓ تم توليد الصوت ({len(audio_data) / 1024:.1f} KB)")
+            return output_path
+        else:
+            logger.error("❌ فشل التوليد → صمت احتياطي")
+            return self._silence(output_path)
+
+    # ════════════════════════════════════════════════════════════════
+    #                    التوليد مع Retry
+    # ════════════════════════════════════════════════════════════════
+    def _generate_with_retry(self, text: str) -> Optional[bytes]:
+        """محاولة التوليد مع إعادة المحاولة."""
+        last_error = None
+
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            # تجربة موديلات مختلفة عند الفشل
+            model_idx = min(attempt - 1, len(self.ARABIC_MODELS) - 1)
+            model = self.ARABIC_MODELS[model_idx]
+
+            logger.info(f"🤖 [محاولة {attempt}/{self.MAX_RETRIES}] {model}")
+
+            try:
+                audio = self._call_api(text, model)
+                if audio and len(audio) > 1000:
+                    return audio
+            except Exception as e:
+                last_error = e
+                logger.warning(f"⚠ فشلت المحاولة {attempt}: {e}")
+                if attempt < self.MAX_RETRIES:
+                    time.sleep(self.RETRY_DELAY * attempt)
+
+        logger.error(f"❌ فشلت كل المحاولات: {last_error}")
+        return None
+
+    # ════════════════════════════════════════════════════════════════
+    #                    استدعاء الـ API
+    # ════════════════════════════════════════════════════════════════
+    def _call_api(self, text: str, model: str) -> Optional[bytes]:
+        """استدعاء ElevenLabs API."""
         url = f"{self.BASE_URL}/text-to-speech/{self.voice_id}"
+
         payload = {
             "text": text,
-            "model_id": "eleven_turbo_v2",
-            "voice_settings": {"stability": 0.4, "similarity_boost": 0.8}
+            "model_id": model,
+            "voice_settings": {
+                "stability":         self.stability,
+                "similarity_boost":  self.similarity,
+                "style":             self.style,
+                "use_speaker_boost": self.use_speaker_boost,
+            },
         }
-        r = requests.post(url, json=payload, headers=self.headers, timeout=90)
-        if r.status_code == 200:
-            return r.content
-        print(f"  ℹ️ ElevenLabs HTTP {r.status_code}: {r.text[:100]}")
-        return None
 
-    def _edge_tts(self, text: str, output_path: str) -> str:
-        import edge_tts
-
-        voices = [
-            "ar-EG-ShakirNeural",
-            "ar-SA-HamedNeural",
-            "ar-EG-SalmaNeural",
-        ]
-
-        for voice in voices:
-            try:
-                async def run(v=voice):
-                    communicate = edge_tts.Communicate(text, voice=v)
-                    await communicate.save(output_path)
-                asyncio.run(run())
-                if Path(output_path).exists() and Path(output_path).stat().st_size > 1000:
-                    print(f"  ✓ Edge voice: {voice}")
-                    return output_path
-            except Exception as e:
-                print(f"  ⚠️ {voice}: {e}")
-        return None
-
-    def _convert_to_wav(self, audio_data: bytes, mime_type: str) -> bytes:
-        params      = self._parse_mime(mime_type)
-        rate        = params["rate"]
-        bits        = params["bits_per_sample"]
-        num_ch      = 1
-        data_size   = len(audio_data)
-        block_align = num_ch * (bits // 8)
-        byte_rate   = rate * block_align
-        header = struct.pack(
-            "<4sI4s4sIHHIIHH4sI",
-            b"RIFF", 36 + data_size, b"WAVE",
-            b"fmt ", 16, 1, num_ch,
-            rate, byte_rate,
-            block_align, bits,
-            b"data", data_size
+        response = requests.post(
+            url,
+            json=payload,
+            headers=self.headers,
+            timeout=120,
         )
-        return header + audio_data
 
-    def _parse_mime(self, mime_type: str) -> dict:
-        bits_per_sample = 16
-        rate = 24000
-        for part in mime_type.split(";"):
-            part = part.strip()
-            if part.lower().startswith("rate="):
-                try:
-                    rate = int(part.split("=", 1)[1])
-                except ValueError:
-                    pass
-            elif part.startswith("audio/L"):
-                try:
-                    bits_per_sample = int(part.split("L", 1)[1])
-                except ValueError:
-                    pass
-        return {"bits_per_sample": bits_per_sample, "rate": rate}
+        if response.status_code == 200:
+            return response.content
+        elif response.status_code == 401:
+            raise RuntimeError("❌ مفتاح ElevenLabs غير صحيح")
+        elif response.status_code == 422:
+            raise RuntimeError(f"❌ بيانات غير صالحة: {response.text[:200]}")
+        elif response.status_code == 429:
+            raise RuntimeError("❌ تجاوزت الحد المسموح (Rate Limit)")
+        else:
+            raise RuntimeError(
+                f"HTTP {response.status_code}: {response.text[:200]}"
+            )
 
-    def _build_text(self, script: dict) -> str:
-        scenes = script.get("scenes", [])
-        parts  = [s.get("text", "").strip() for s in scenes if s.get("text", "").strip()]
-        cta    = script.get("cta", "").strip()
-        full   = " . ".join(parts)
+    # ════════════════════════════════════════════════════════════════
+    #                    بناء النص الكامل
+    # ════════════════════════════════════════════════════════════════
+    def _build_full_text(self, script: dict) -> str:
+        """تجميع النص الكامل من المشاهد مع علامات وقفات."""
+        parts = []
+
+        for scene in script.get("scenes", []):
+            text = scene.get("text", "").strip()
+            pause = float(scene.get("pause_after", 0.3))
+
+            if not text:
+                continue
+
+            parts.append(text)
+
+            # ElevenLabs يدعم <break time="1s"/> في النص
+            if pause >= 0.8:
+                parts.append('<break time="1s"/>')
+            elif pause >= 0.5:
+                parts.append('<break time="0.6s"/>')
+            elif pause >= 0.3:
+                parts.append('<break time="0.3s"/>')
+
+        # إضافة CTA
+        cta = script.get("cta", "").strip()
         if cta:
-            full += f" . {cta}"
-        print(f"  📜 Scenes: {len(parts)} | CTA: {'yes' if cta else 'no'}")
-        return full
+            parts.append('<break time="1s"/>')
+            parts.append(cta)
 
-    def _save(self, path: str, data: bytes) -> str:
-        with open(path, "wb") as f:
-            f.write(data)
-        return path
+        return " ".join(parts).strip()
 
-    def _silent_audio(self, output_path: str) -> str:
-        subprocess.run([
-            "ffmpeg", "-y", "-f", "lavfi",
-            "-i", "anullsrc=r=44100:cl=stereo",
-            "-t", "30", output_path
-        ], capture_output=True)
+    # ════════════════════════════════════════════════════════════════
+    #                    صمت احتياطي
+    # ════════════════════════════════════════════════════════════════
+    def _silence(self, output_path: str, duration: int = 30) -> str:
+        """توليد ملف صمت كآخر احتياطي."""
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-f", "lavfi",
+                    "-i", "anullsrc=r=44100:cl=stereo",
+                    "-t", str(duration),
+                    "-c:a", "libmp3lame", "-b:a", "128k",
+                    output_path,
+                ],
+                capture_output=True,
+                check=True,
+            )
+        except Exception as e:
+            logger.error(f"❌ فشل توليد الصمت: {e}")
         return output_path
+
+    # ════════════════════════════════════════════════════════════════
+    #                    دوال مساعدة
+    # ════════════════════════════════════════════════════════════════
+    def list_voices(self) -> list:
+        """جلب قائمة الأصوات المتاحة في حسابك."""
+        try:
+            response = requests.get(
+                f"{self.BASE_URL}/voices",
+                headers={"xi-api-key": self.api_key},
+                timeout=30,
+            )
+            if response.status_code == 200:
+                return response.json().get("voices", [])
+        except Exception as e:
+            logger.error(f"❌ فشل جلب الأصوات: {e}")
+        return []
+
+    def get_user_info(self) -> dict:
+        """معلومات الحساب (الحد المتبقي، إلخ)."""
+        try:
+            response = requests.get(
+                f"{self.BASE_URL}/user",
+                headers={"xi-api-key": self.api_key},
+                timeout=30,
+            )
+            if response.status_code == 200:
+                return response.json()
+        except Exception as e:
+            logger.error(f"❌ فشل جلب معلومات المستخدم: {e}")
+        return {}
+
+    def get_remaining_chars(self) -> Optional[int]:
+        """الأحرف المتبقية في الاشتراك."""
+        info = self.get_user_info()
+        try:
+            sub = info.get("subscription", {})
+            limit = sub.get("character_limit", 0)
+            used = sub.get("character_count", 0)
+            return limit - used
+        except Exception:
+            return None
+
+    def generate_for_text(
+        self,
+        text: str,
+        output_path: str,
+        voice_id: Optional[str] = None,
+    ) -> str:
+        """توليد صوت لنص بسيط."""
+        if voice_id:
+            original_voice = self.voice_id
+            self.voice_id = voice_id
+
+        try:
+            audio = self._generate_with_retry(text)
+            if audio:
+                with open(output_path, "wb") as f:
+                    f.write(audio)
+                return output_path
+        finally:
+            if voice_id:
+                self.voice_id = original_voice
+
+        return self._silence(output_path)
+
+
+# ════════════════════════════════════════════════════════════════════════
+#                    اختبار سريع
+# ════════════════════════════════════════════════════════════════════════
+if __name__ == "__main__":
+    tts = ElevenLabsTTS()
+    
+    # عرض معلومات الحساب
+    remaining = tts.get_remaining_chars()
+    if remaining is not None:
+        print(f"📊 الأحرف المتبقية: {remaining:,}")
+    
+    # اختبار
+    test_script = {
+        "scenes": [
+            {"text": "مرحباً بكم في عالم الإبداع.", "pause_after": 0.5},
+            {"text": "هنا تبدأ القصة.", "pause_after": 0.8},
+        ],
+        "cta": "تابعونا للمزيد!",
+    }
+    output = tts.generate_audio(test_script, "test_elevenlabs.mp3")
+    print(f"✓ تم: {output}")
