@@ -1,38 +1,29 @@
-# .github/workflows/generate.yml
+name: Generate Viral Video
 
-name: Generate Viral Arabic Video
 on:
+  schedule:
+    - cron: "0 8 * * *"      # كل يوم الساعة 8 صباحاً
   workflow_dispatch:
     inputs:
       topic:
-        description: "موضوع الفيديو بالعربية"
-        required: true
+        description: "موضوع الفيديو"
+        required: false
         default: "الطموح والنجاح"
       preset:
-        description: "جودة الإنتاج"
-        required: true
-        default: "preview"
+        description: "جودة الإخراج"
+        required: false
+        default: "tiktok"
         type: choice
-        options:
-          - preview
-          - tiktok
-          - reels
-  schedule:
-    - cron: "0 8 * * *"
+        options: [tiktok, reels, preview]
 
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install FFmpeg
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-noto fonts-arabeyes
-          ffmpeg -version | head -1
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -40,68 +31,46 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Install FFmpeg
+        run: sudo apt-get install -y ffmpeg
 
-      - name: Download Arabic fonts
-        run: |
-          python download_fonts.py
-          if [ ! -f "engine/assets/fonts/Cairo-Black.ttf" ] && [ ! -f "engine/assets/fonts/NotoNaskhArabic-Bold.ttf" ]; then
-            echo "⚠️ Using system fonts as fallback..."
-            mkdir -p engine/assets/fonts
-            find /usr/share/fonts -name "*.ttf" | grep -i -E "arab|noto|cairo" | head -5 | while read f; do
-              cp "$f" engine/assets/fonts/ 2>/dev/null || true
-            done
-          fi
-          echo "Fonts available:"
-          ls engine/assets/fonts/
+      - name: Install Arabic fonts
+        run: sudo apt-get install -y fonts-noto-core
 
-      - name: Verify setup
-        run: |
-          python -c "
-          import arabic_reshaper, subprocess
-          from bidi.algorithm import get_display
-          from PIL import Image
-          print('arabic_reshaper OK')
-          print('bidi OK')
-          print('Pillow OK')
-          r = subprocess.run(['ffmpeg','-filters'], capture_output=True, text=True)
-          print('xfade OK' if 'xfade' in r.stdout else 'xfade MISSING')
-          "
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Create directories
+        run: mkdir -p output temp engine/assets/fonts engine/assets/music engine/assets/sfx
 
       - name: Generate video
         env:
-          GROQ_API_KEY:        ${{ secrets.GROQ_API_KEY }}
-          GEMINI_API_KEY:      ${{ secrets.GEMINI_API_KEY }}
-          ELEVENLABS_API_KEY:  ${{ secrets.ELEVENLABS_API_KEY }}
-          ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
-          PEXELS_API_KEY:      ${{ secrets.PEXELS_API_KEY }}
-          VIDEO_WIDTH:         "1080"
-          VIDEO_HEIGHT:        "1920"
-          VIDEO_FPS:           "30"
-          TEMP_DIR:            "./temp"
-          OUTPUT_DIR:          "./output"
-          DEFAULT_TOPIC:       "الطموح والنجاح"
+          # ─── مطلوب فقط GROQ_API_KEY ──────────────────────────────────
+          GROQ_API_KEY:   ${{ secrets.GROQ_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          OUTPUT_DIR:     ./output
+          TEMP_DIR:       ./temp
+          VIDEO_WIDTH:    "1080"
+          VIDEO_HEIGHT:   "1920"
+          VIDEO_FPS:      "30"
+          DEFAULT_TOPIC:  ${{ github.event.inputs.topic || 'الطموح والنجاح' }}
         run: |
           python main.py \
             --topic "${{ github.event.inputs.topic || 'الطموح والنجاح' }}" \
-            --preset "${{ github.event.inputs.preset || 'preview' }}" \
-            --no-cleanup
+            --preset "${{ github.event.inputs.preset || 'tiktok' }}"
 
-      - name: Upload video
+      - name: Upload video artifact
         uses: actions/upload-artifact@v4
-        if: always()
+        if: success()
         with:
           name: viral-video-${{ github.run_number }}
-          path: |
-            output/*.mp4
-            output/*.jpg
+          path: output/*.mp4
           retention-days: 7
 
-      - name: Summary
-        if: always()
-        run: |
-          echo "### Output files" >> $GITHUB_STEP_SUMMARY
-          ls -lh output/ 2>/dev/null | tee -a $GITHUB_STEP_SUMMARY || echo "No output"
+      - name: Upload thumbnail
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: thumbnail-${{ github.run_number }}
+          path: output/*.jpg
+          retention-days: 7
