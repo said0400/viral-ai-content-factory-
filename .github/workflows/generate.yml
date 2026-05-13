@@ -1,76 +1,210 @@
-name: Generate Viral Video
+name: 🎬 Generate Arabic Shorts
 
 on:
-  schedule:
-    - cron: "0 8 * * *"      # كل يوم الساعة 8 صباحاً
   workflow_dispatch:
     inputs:
       topic:
-        description: "موضوع الفيديو"
+        description: "📝 موضوع الفيديو"
         required: false
         default: "الطموح والنجاح"
-      preset:
-        description: "جودة الإخراج"
+      content_type:
+        description: "🎭 نوع المحتوى"
         required: false
-        default: "tiktok"
+        default: "motivational"
         type: choice
-        options: [tiktok, reels, preview]
+        options:
+          - motivational
+          - educational
+          - story
+          - quote
+      voice:
+        description: "🎙️ الصوت"
+        required: false
+        default: "ar-SA-HamedNeural"
+        type: choice
+        options:
+          - ar-SA-HamedNeural
+          - ar-SA-ZariyahNeural
+          - ar-EG-ShakirNeural
+          - ar-EG-SalmaNeural
+      duration:
+        description: "⏱️ مدة الفيديو (ثانية)"
+        required: false
+        default: "45"
+        type: choice
+        options: ["30", "45", "60"]
+      quality:
+        description: "✨ جودة التصدير"
+        required: false
+        default: "high"
+        type: choice
+        options: [medium, high, ultra]
+
+permissions:
+  contents: write   # مطلوب لإنشاء Releases
 
 jobs:
   generate:
+    name: 🚀 Generate & Publish Video
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
-      - name: Checkout
+      # ─────────────────────────────────────────────────────────
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      # ─────────────────────────────────────────────────────────
+      - name: 🐍 Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install FFmpeg
-        run: sudo apt-get install -y ffmpeg
+      # ─────────────────────────────────────────────────────────
+      - name: 🎞️ Install FFmpeg & system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg \
+            fonts-noto-core \
+            fonts-noto-color-emoji \
+            fontconfig
 
-      - name: Install Arabic fonts
-        run: sudo apt-get install -y fonts-noto-core
+      # ─────────────────────────────────────────────────────────
+      - name: 📦 Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Install Python deps
-        run: pip install -r requirements.txt
+      # ─────────────────────────────────────────────────────────
+      - name: 🔤 Download Arabic fonts
+        run: python download_fonts.py
 
-      - name: Create directories
-        run: mkdir -p output temp engine/assets/fonts engine/assets/music engine/assets/sfx
+      # ─────────────────────────────────────────────────────────
+      - name: 📁 Create required directories
+        run: |
+          mkdir -p output temp
+          mkdir -p engine/assets/fonts
+          mkdir -p engine/assets/music
+          mkdir -p engine/assets/sfx
 
-      - name: Generate video
+      # ─────────────────────────────────────────────────────────
+      - name: 🎬 Generate video
+        id: generate
         env:
-          # ─── مطلوب فقط GROQ_API_KEY ──────────────────────────────────
-          GROQ_API_KEY:   ${{ secrets.GROQ_API_KEY }}
+          # 🤖 AI Keys
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+          # 🎙️ TTS Keys
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
+          TTS_VOICE: ${{ github.event.inputs.voice }}
+
+          # 🎬 Media Sources
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-          OUTPUT_DIR:     ./output
-          TEMP_DIR:       ./temp
-          VIDEO_WIDTH:    "1080"
-          VIDEO_HEIGHT:   "1920"
-          VIDEO_FPS:      "30"
-          DEFAULT_TOPIC:  ${{ github.event.inputs.topic || 'الطموح والنجاح' }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+
+          # ⚙️ Video Settings
+          VIDEO_WIDTH: "1080"
+          VIDEO_HEIGHT: "1920"
+          VIDEO_FPS: "30"
+          VIDEO_TARGET_DURATION: ${{ github.event.inputs.duration }}
+          VIDEO_QUALITY: ${{ github.event.inputs.quality }}
+
+          # 🎵 Music
+          ENABLE_BACKGROUND_MUSIC: "true"
+          MUSIC_VOLUME: "0.15"
+
+          # 📁 Paths
+          OUTPUT_DIR: ./output
+          TEMP_DIR: ./temp
+
+          # 📝 Content
+          DEFAULT_TOPIC: ${{ github.event.inputs.topic }}
+          CONTENT_TYPE: ${{ github.event.inputs.content_type }}
         run: |
           python main.py \
-            --topic "${{ github.event.inputs.topic || 'الطموح والنجاح' }}" \
-            --preset "${{ github.event.inputs.preset || 'tiktok' }}"
+            --topic "${{ github.event.inputs.topic }}" \
+            --type "${{ github.event.inputs.content_type }}" \
+            --duration "${{ github.event.inputs.duration }}" \
+            --quality "${{ github.event.inputs.quality }}"
 
-      - name: Upload video artifact
+      # ─────────────────────────────────────────────────────────
+      - name: 📊 Get video info
+        id: video_info
+        if: success()
+        run: |
+          VIDEO_FILE=$(ls output/*.mp4 | head -n 1)
+          VIDEO_NAME=$(basename "$VIDEO_FILE")
+          VIDEO_SIZE=$(du -h "$VIDEO_FILE" | cut -f1)
+          TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
+          echo "video_file=$VIDEO_FILE" >> $GITHUB_OUTPUT
+          echo "video_name=$VIDEO_NAME" >> $GITHUB_OUTPUT
+          echo "video_size=$VIDEO_SIZE" >> $GITHUB_OUTPUT
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+
+      # ─────────────────────────────────────────────────────────
+      - name: 📤 Upload as Artifact (backup)
         uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: viral-video-${{ github.run_number }}
-          path: output/*.mp4
-          retention-days: 7
+          name: shorts-${{ github.run_number }}
+          path: |
+            output/*.mp4
+            output/*.jpg
+            output/*.txt
+          retention-days: 30
 
-      - name: Upload thumbnail
-        uses: actions/upload-artifact@v4
+      # ─────────────────────────────────────────────────────────
+      - name: 🚀 Publish to GitHub Release
         if: success()
+        uses: softprops/action-gh-release@v2
         with:
-          name: thumbnail-${{ github.run_number }}
-          path: output/*.jpg
-          retention-days: 7
+          tag_name: video-${{ github.run_number }}-${{ steps.video_info.outputs.timestamp }}
+          name: 🎬 Short ${{ github.run_number }} - ${{ github.event.inputs.topic }}
+          body: |
+            ## 🎥 فيديو جديد تم إنشاؤه تلقائياً
+
+            **📝 الموضوع:** ${{ github.event.inputs.topic }}
+            **🎭 النوع:** ${{ github.event.inputs.content_type }}
+            **🎙️ الصوت:** ${{ github.event.inputs.voice }}
+            **⏱️ المدة:** ${{ github.event.inputs.duration }} ثانية
+            **✨ الجودة:** ${{ github.event.inputs.quality }}
+            **📦 الحجم:** ${{ steps.video_info.outputs.video_size }}
+
+            ---
+            🤖 تم الإنشاء بواسطة: AI Shorts Generator
+            🔗 رقم التشغيل: #${{ github.run_number }}
+            📅 التاريخ: ${{ steps.video_info.outputs.timestamp }}
+          files: |
+            output/*.mp4
+            output/*.jpg
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ─────────────────────────────────────────────────────────
+      - name: 📋 Workflow Summary
+        if: always()
+        run: |
+          echo "## 🎬 ملخص التشغيل" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| الخاصية | القيمة |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 📝 الموضوع | ${{ github.event.inputs.topic }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎭 النوع | ${{ github.event.inputs.content_type }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎙️ الصوت | ${{ github.event.inputs.voice }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⏱️ المدة | ${{ github.event.inputs.duration }}s |" >> $GITHUB_STEP_SUMMARY
+          echo "| ✨ الجودة | ${{ github.event.inputs.quality }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔢 رقم التشغيل | #${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ✅ الحالة | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+
+      # ─────────────────────────────────────────────────────────
+      - name: 🧹 Cleanup
+        if: always()
+        run: |
+          rm -rf temp/ || true
+          echo "✅ تم التنظيف"
