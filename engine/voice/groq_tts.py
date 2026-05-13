@@ -1,12 +1,22 @@
 """
-Groq TTS Engine — يستبدل ElevenLabs و Gemini TTS كلياً
-يستخدم PlayAI عبر Groq API (يدعم العربية رسمياً)
+Groq TTS Engine — النسخة الصحيحة والمتحقق منها
+================================================================
+الموديل الرسمي الحالي: canopylabs/orpheus-arabic-saudi
+الأصوات المتاحة (موثقة من Groq Docs):
+  - fahad  ← صوت ذكوري عميق  ✓
+  - sultan ← صوت ذكوري رسمي  ✓
+  - noura  ← صوت أنثوي        ✓
+  - lulwa  ← صوت أنثوي        ✓
+
+⚠️ حد مهم: الموديل يقبل 200 حرف كحد أقصى لكل طلب
+   لذلك نقسم النص على chunks ونجمع الصوتيات ببعضها
 
 ضع هذا الملف في: engine/voice/groq_tts.py
-واحذف: engine/voice/elevenlabs_tts.py
+================================================================
 """
 
 import os
+import re
 import asyncio
 import shutil
 import subprocess
@@ -17,21 +27,31 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# ─── الموديل والأصوات الموثقة رسمياً ──────────────────────────────────────
+ARABIC_MODEL  = "canopylabs/orpheus-arabic-saudi"
+ARABIC_VOICES = ["fahad", "sultan", "noura", "lulwa"]
 
-# ─── خريطة الأصوات حسب الـ mood ────────────────────────────────────────────
+# خريطة mood → صوت (كلها موثقة)
 MOOD_VOICE_MAP = {
-    "epic":         "Nasser-PlayAI",
-    "motivational": "Nasser-PlayAI",
-    "dramatic":     "Ahmad-PlayAI",
-    "dark":         "Ahmad-PlayAI",
-    "emotional":    "Khalid-PlayAI",
-    "calm":         "Khalid-PlayAI",
-    "romantic":     "Khalid-PlayAI",
-    "intelligence": "Ahmad-PlayAI",
+    "epic":         "fahad",
+    "motivational": "fahad",
+    "dramatic":     "sultan",
+    "dark":         "sultan",
+    "emotional":    "fahad",
+    "calm":         "sultan",
+    "romantic":     "sultan",
+    "intelligence": "sultan",
 }
 
-ARABIC_VOICES  = ["Nasser-PlayAI", "Ahmad-PlayAI", "Khalid-PlayAI"]
-EDGE_AR_VOICES = ["ar-SA-HamedNeural", "ar-EG-ShakirNeural", "ar-SA-NaifNeural"]
+# حد الأحرف لكل طلب (من الوثائق الرسمية)
+MAX_CHARS = 190   # أقل من 200 بهامش أمان
+
+# أصوات Edge TTS عربية للـ fallback
+EDGE_AR_VOICES = [
+    "ar-SA-HamedNeural",
+    "ar-EG-ShakirNeural",
+    "ar-SA-NaifNeural",
+]
 
 
 class GroqTTS:
@@ -48,122 +68,234 @@ class GroqTTS:
     # ─── الدالة الرئيسية ────────────────────────────────────────────────────
 
     def generate_audio(self, script: dict, output_path: str) -> str:
-        text  = self._build_text(script)
+        """
+        يولّد الصوت لكل المشاهد مجتمعة.
+        يقسم النص على chunks بسبب حد الـ 200 حرف.
+        """
         mood  = script.get("music_mood", "motivational")
-        voice = MOOD_VOICE_MAP.get(mood, "Nasser-PlayAI")
+        voice = MOOD_VOICE_MAP.get(mood, "fahad")
 
-        print(f"  🎙️ Groq TTS | playai-tts-arabic | صوت: {voice}")
-        print(f"  📝 طول النص: {len(text)} حرف")
+        print(f"  🎙️ Groq TTS | {ARABIC_MODEL} | صوت: {voice}")
 
-        # 1) playai-tts-arabic بالصوت المناسب
-        audio = self._call_groq(text, "playai-tts-arabic", voice)
+        # بناء قائمة الـ chunks من المشاهد
+        chunks = self._build_chunks(script)
+        print(f"  📦 {len(chunks)} chunk | mood: {mood}")
 
-        # 2) أصوات بديلة من نفس الموديل
-        if not audio:
-            for alt in ARABIC_VOICES:
-                if alt != voice:
-                    print(f"  ↩️ جرب صوت: {alt}")
-                    audio = self._call_groq(text, "playai-tts-arabic", alt)
-                    if audio:
-                        break
+        # توليد صوت لكل chunk
+        wav_files = []
+        for i, chunk in enumerate(chunks):
+            chunk_out = str(self.temp_dir / f"chunk_{i:03d}.wav")
+            success   = self._generate_chunk(chunk, voice, chunk_out)
 
-        # 3) playai-tts العادي
-        if not audio:
-            print("  ↩️ جرب playai-tts...")
-            audio = self._call_groq(text, "playai-tts", "Fritz-PlayAI")
+            if not success:
+                # جرب صوت بديل
+                for alt_voice in ARABIC_VOICES:
+                    if alt_voice != voice:
+                        success = self._generate_chunk(chunk, alt_voice, chunk_out)
+                        if success:
+                            break
 
-        # 4) Edge TTS مجاني
-        if not audio:
-            print("  ↩️ Fallback Edge TTS...")
-            return self._edge_tts(text, output_path)
+            if not success:
+                # fallback: Edge TTS لهذا الـ chunk
+                chunk_out = self._edge_tts_chunk(chunk, chunk_out)
 
-        raw_wav = str(self.temp_dir / "groq_raw_voice.wav")
-        with open(raw_wav, "wb") as f:
-            f.write(audio)
+            if os.path.exists(chunk_out) and os.path.getsize(chunk_out) > 500:
+                wav_files.append(chunk_out)
 
-        return self._to_mp3(raw_wav, output_path)
+        if not wav_files:
+            print("  ❌ كل محاولات TTS فشلت — صمت")
+            return self._silence(output_path)
 
-    # ─── استدعاء Groq ───────────────────────────────────────────────────────
+        # دمج كل الـ chunks في ملف واحد
+        merged = str(self.temp_dir / "merged_voice.wav")
+        self._concat_wavs(wav_files, merged)
 
-    def _call_groq(self, text: str, model: str, voice: str) -> bytes | None:
+        # تحويل إلى MP3
+        return self._to_mp3(merged, output_path)
+
+    # ─── تقسيم النص على chunks ──────────────────────────────────────────────
+
+    def _build_chunks(self, script: dict) -> list:
+        """
+        يبني قائمة chunks من المشاهد.
+        كل chunk لا يتجاوز MAX_CHARS حرف.
+        يحترم حدود الجمل (لا يقطع في منتصف الكلمة).
+        """
+        chunks  = []
+        current = ""
+
+        for scene in script.get("scenes", []):
+            text  = scene.get("text", "").strip()
+            pause = float(scene.get("pause_after", 0.3))
+
+            if not text:
+                continue
+
+            # اختر فاصل مناسب
+            sep = "... " if pause >= 0.8 else (".. " if pause >= 0.5 else "، ")
+            sentence = text + sep
+
+            # إذا الجملة وحدها تتجاوز الحد، قسّمها
+            if len(sentence) > MAX_CHARS:
+                # أضف الـ current أولاً إذا كان فيه شيء
+                if current.strip():
+                    chunks.append(current.strip())
+                    current = ""
+                # قسّم الجملة الطويلة
+                for sub in self._split_long(sentence):
+                    chunks.append(sub.strip())
+            elif len(current) + len(sentence) > MAX_CHARS:
+                # الـ current امتلأ، احفظه وابدأ جديد
+                if current.strip():
+                    chunks.append(current.strip())
+                current = sentence
+            else:
+                current += sentence
+
+        # أضف الـ CTA
+        cta = script.get("cta", "").strip()
+        if cta:
+            if len(current) + len(cta) > MAX_CHARS:
+                if current.strip():
+                    chunks.append(current.strip())
+                chunks.append(cta)
+            else:
+                current += cta
+
+        if current.strip():
+            chunks.append(current.strip())
+
+        return chunks if chunks else ["مرحباً"]
+
+    def _split_long(self, text: str) -> list:
+        """يقسم النص الطويل على حدود الكلمات."""
+        words  = text.split()
+        parts  = []
+        current = ""
+        for word in words:
+            if len(current) + len(word) + 1 > MAX_CHARS:
+                if current:
+                    parts.append(current.strip())
+                current = word + " "
+            else:
+                current += word + " "
+        if current.strip():
+            parts.append(current.strip())
+        return parts if parts else [text[:MAX_CHARS]]
+
+    # ─── توليد chunk واحد ────────────────────────────────────────────────────
+
+    def _generate_chunk(self, text: str, voice: str, output_path: str) -> bool:
+        """يولّد صوت لـ chunk واحد. يُعيد True إذا نجح."""
         try:
             resp = self.client.audio.speech.create(
-                model=model,
+                model=ARABIC_MODEL,
                 voice=voice,
                 input=text,
                 response_format="wav",
             )
             data = resp.read()
-            if data and len(data) > 2000:
-                print(f"  ✓ Groq TTS نجح ({len(data):,} bytes)")
-                return data
-            return None
+            if data and len(data) > 500:
+                with open(output_path, "wb") as f:
+                    f.write(data)
+                return True
+            return False
         except Exception as e:
-            print(f"  ⚠️ [{model}/{voice}]: {e}")
-            return None
+            print(f"  ⚠️ chunk فشل [{voice}]: {e}")
+            return False
 
-    # ─── بناء النص مع توقفات طبيعية ────────────────────────────────────────
+    # ─── دمج ملفات WAV ──────────────────────────────────────────────────────
 
-    def _build_text(self, script: dict) -> str:
-        parts = []
-        for scene in script.get("scenes", []):
-            text  = scene.get("text", "").strip()
-            pause = float(scene.get("pause_after", 0.3))
-            if not text:
-                continue
-            if pause >= 0.8:
-                sep = "... "
-            elif pause >= 0.5:
-                sep = ".. "
-            else:
-                sep = "، "
-            parts.append(text + sep)
+    def _concat_wavs(self, wav_files: list, output_path: str) -> str:
+        if len(wav_files) == 1:
+            shutil.copy(wav_files[0], output_path)
+            return output_path
 
-        cta = script.get("cta", "").strip()
-        if cta:
-            parts.append(cta)
+        # بناء قائمة concat لـ FFmpeg
+        list_file = str(self.temp_dir / "concat_list.txt")
+        with open(list_file, "w", encoding="utf-8") as f:
+            for wav in wav_files:
+                f.write(f"file '{os.path.abspath(wav)}'\n")
 
-        return " ".join(parts)
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", list_file,
+                "-c:a", "pcm_s16le",
+                output_path,
+            ],
+            capture_output=True,
+        )
+
+        if result.returncode != 0:
+            # fallback: نسخ أول ملف فقط
+            shutil.copy(wav_files[0], output_path)
+
+        return output_path
 
     # ─── تحويل WAV → MP3 ────────────────────────────────────────────────────
 
-    def _to_mp3(self, wav_path: str, out: str) -> str:
+    def _to_mp3(self, wav_path: str, output_path: str) -> str:
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", wav_path,
-             "-ar", "44100", "-ac", "2", "-b:a", "192k", out],
+            [
+                "ffmpeg", "-y", "-i", wav_path,
+                "-ar", "44100", "-ac", "2",
+                "-b:a", "192k",
+                output_path,
+            ],
             capture_output=True,
         )
         if result.returncode != 0:
-            shutil.copy(wav_path, out)
-        return out
+            shutil.copy(wav_path, output_path)
+        return output_path
 
-    # ─── Edge TTS fallback ──────────────────────────────────────────────────
+    # ─── Edge TTS fallback لـ chunk واحد ────────────────────────────────────
 
-    def _edge_tts(self, text: str, output_path: str) -> str:
+    def _edge_tts_chunk(self, text: str, output_path: str) -> str:
         try:
             import edge_tts
 
             async def _run(voice: str) -> bool:
                 try:
                     await edge_tts.Communicate(text, voice=voice).save(output_path)
-                    return Path(output_path).exists() and Path(output_path).stat().st_size > 1000
+                    return (
+                        Path(output_path).exists()
+                        and Path(output_path).stat().st_size > 500
+                    )
                 except Exception:
                     return False
 
-            for voice in EDGE_AR_VOICES:
-                if asyncio.run(_run(voice)):
-                    print(f"  ✓ Edge TTS: {voice}")
+            for v in EDGE_AR_VOICES:
+                if asyncio.run(_run(v)):
                     return output_path
+
         except ImportError:
             pass
 
-        return self._silence(output_path)
-
-    def _silence(self, out: str) -> str:
+        # صمت قصير كـ fallback أخير
+        dur = max(len(text) / 15, 1.0)
         subprocess.run(
-            ["ffmpeg", "-y", "-f", "lavfi",
-             "-i", "anullsrc=r=44100:cl=stereo",
-             "-t", "55", "-b:a", "128k", out],
+            [
+                "ffmpeg", "-y", "-f", "lavfi",
+                "-i", "anullsrc=r=44100:cl=stereo",
+                "-t", str(dur), "-b:a", "64k",
+                output_path,
+            ],
             capture_output=True,
         )
-        return out
+        return output_path
+
+    # ─── صمت كامل (fallback أخير) ───────────────────────────────────────────
+
+    def _silence(self, output_path: str) -> str:
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-f", "lavfi",
+                "-i", "anullsrc=r=44100:cl=stereo",
+                "-t", "55", "-b:a", "128k",
+                output_path,
+            ],
+            capture_output=True,
+        )
+        return output_path
