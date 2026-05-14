@@ -48,48 +48,46 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 class SubtitleEngine:
     """محرك الترجمة العربية الاحترافية."""
 
-    # ─── أولويات الخطوط (متطابق مع download_fonts.py) ─────────────
-   FONT_PATHS = [
-    # 🌟 الخطوط الأساسية (Static - تعمل دائماً)
-    "engine/assets/fonts/Tajawal-ExtraBold.ttf",
-    "engine/assets/fonts/Tajawal-Bold.ttf",
-    "engine/assets/fonts/Almarai-ExtraBold.ttf",
-    "engine/assets/fonts/Almarai-Bold.ttf",
-    "engine/assets/fonts/Amiri-Bold.ttf",
-    
-    # 🎨 Variable Fonts (تعمل مع Pillow الحديث)
-    "engine/assets/fonts/Cairo-VF.ttf",
-    "engine/assets/fonts/Changa-VF.ttf",
-    "engine/assets/fonts/NotoNaskhArabic-VF.ttf",
-    
-    # خطوط Regular احتياطية
-    "engine/assets/fonts/Tajawal-Regular.ttf",
-    "engine/assets/fonts/Almarai-Regular.ttf",
-    "engine/assets/fonts/Amiri-Regular.ttf",
-    
-    # خطوط النظام (Linux - من fonts-noto-core)
-    "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf",
-    "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-]
+    # ─── أولويات الخطوط (محدّث 2024) ─────────────────────────────
+    FONT_PATHS = [
+        # 🌟 الخطوط الأساسية (Static - تعمل دائماً)
+        "engine/assets/fonts/Tajawal-ExtraBold.ttf",
+        "engine/assets/fonts/Tajawal-Bold.ttf",
+        "engine/assets/fonts/Almarai-ExtraBold.ttf",
+        "engine/assets/fonts/Almarai-Bold.ttf",
+        "engine/assets/fonts/Amiri-Bold.ttf",
+        # 🎨 Variable Fonts (تعمل مع Pillow الحديث)
+        "engine/assets/fonts/Cairo-VF.ttf",
+        "engine/assets/fonts/Changa-VF.ttf",
+        "engine/assets/fonts/NotoNaskhArabic-VF.ttf",
+        # خطوط Regular احتياطية
+        "engine/assets/fonts/Tajawal-Regular.ttf",
+        "engine/assets/fonts/Almarai-Regular.ttf",
+        "engine/assets/fonts/Amiri-Regular.ttf",
+        # الخطوط القديمة (للتوافق)
+        "engine/assets/fonts/Cairo-Bold.ttf",
+        "engine/assets/fonts/Cairo.ttf",
+        "engine/assets/fonts/Tajawal.ttf",
+        "engine/assets/fonts/Changa.ttf",
+        "engine/assets/fonts/NotoNaskhArabic.ttf",
+        # خطوط النظام (Linux - من fonts-noto-core)
+        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
 
     # ─── أحجام الخطوط الافتراضية ─────────────────────────────────
     DEFAULT_SIZES = {
-        "lg": 84,   # كبير - للـ hook
-        "md": 68,   # متوسط - للنصوص العادية
-        "sm": 54,   # صغير - للنصوص الطويلة
+        "lg": 84,
+        "md": 68,
+        "sm": 54,
     }
 
     # ════════════════════════════════════════════════════════════════
     def __init__(self, video_width: int = 1080, video_height: int = 1920):
-        """
-        Args:
-            video_width: عرض الفيديو
-            video_height: ارتفاع الفيديو
-        """
         self.w = video_width
         self.h = video_height
 
@@ -106,7 +104,6 @@ class SubtitleEngine:
         self.enable_background = os.getenv("SUBTITLE_BACKGROUND", "false").lower() == "true"
         self.enable_glow = os.getenv("SUBTITLE_GLOW", "true").lower() == "true"
 
-        # عرض الكتابة (نسبة من عرض الفيديو)
         self.text_width_ratio = float(os.getenv("SUBTITLE_WIDTH_RATIO", "0.86"))
 
         # فحص الخط
@@ -117,7 +114,7 @@ class SubtitleEngine:
                 "   حلول مقترحة:\n"
                 "   1. شغّل: python download_fonts.py\n"
                 "   2. أو ثبّت: apt install fonts-noto-core\n"
-                "   3. أو ضع خط Cairo-Bold.ttf في engine/assets/fonts/"
+                "   3. أو ضع خط Tajawal-ExtraBold.ttf في engine/assets/fonts/"
             )
 
         # تحميل الخطوط
@@ -177,7 +174,6 @@ class SubtitleEngine:
 
         output = str(self.sub_dir / f"sub_{idx:03d}.png")
 
-        # الحصول على الإعدادات
         cfg = self._get_style(scene_type, text)
 
         font = cfg["font"]
@@ -188,45 +184,36 @@ class SubtitleEngine:
         stroke_color = cfg["stroke_c"]
         shadow_offset = cfg["shadow"]
 
-        # إنشاء الصورة الشفافة
         img = Image.new("RGBA", (self.w, self.h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
 
-        # ─── معالجة العربية وتقسيم النص ───────────────────────
         max_width = int(self.w * self.text_width_ratio)
         display_lines = self._wrap_arabic(text, font, max_width)
 
         if not display_lines or not display_lines[0]:
-            # نص فارغ - أنشئ PNG شفاف فقط
             img.save(output, "PNG")
             return output
 
-        # ─── حساب الأبعاد ───────────────────────────────────
         line_height = font.size + 30
         total_height = len(display_lines) * line_height
         start_y = int(self.h * ypos) - total_height // 2
 
-        # ─── رسم background اختياري ─────────────────────────
         if self.enable_background:
             self._draw_background(
                 draw, display_lines, font,
                 start_y, line_height,
             )
 
-        # ─── رسم كل سطر ─────────────────────────────────────
         for i, line in enumerate(display_lines):
             y = start_y + i * line_height
 
-            # حساب موضع X (centered)
             bbox = draw.textbbox((0, 0), line, font=font)
             width = bbox[2] - bbox[0]
             x = (self.w - width) // 2
 
-            # 1. Glow effect
             if self.enable_glow:
                 self._draw_glow(img, line, font, x, y, glow_color)
 
-            # 2. Shadow
             if shadow_offset > 0:
                 draw.text(
                     (x + shadow_offset, y + shadow_offset),
@@ -235,7 +222,6 @@ class SubtitleEngine:
                     fill=(0, 0, 0, 180),
                 )
 
-            # 3. Highlight أو text عادي
             is_emphasis = self._line_has_emphasis(line, text, emphasis_words)
 
             if is_emphasis:
@@ -262,13 +248,7 @@ class SubtitleEngine:
         font: ImageFont.FreeTypeFont,
         max_width: int,
     ) -> List[str]:
-        """
-        تقسيم النص العربي على أسطر بشكل صحيح:
-          1. reshape كل كلمة (شكل الحروف)
-          2. bidi لكل كلمة (اتجاه الحروف)
-          3. قياس العرض بعد المعالجة
-          4. عكس ترتيب الكلمات في كل سطر (RTL)
-        """
+        """تقسيم النص العربي على أسطر بشكل صحيح."""
         if not text or not text.strip():
             return [""]
 
@@ -276,7 +256,6 @@ class SubtitleEngine:
         if not words:
             return [""]
 
-        # معالجة كل كلمة منفردة (يحافظ على اتصال الحروف)
         shaped_words = []
         for word in words:
             sw = word
@@ -292,7 +271,6 @@ class SubtitleEngine:
                     logger.debug(f"bidi failed for '{word}': {e}")
             shaped_words.append(sw)
 
-        # تجميع الكلمات في أسطر
         test_img = Image.new("RGB", (10, 10))
         test_draw = ImageDraw.Draw(test_img)
 
@@ -306,7 +284,6 @@ class SubtitleEngine:
             needed = word_width + (space_width if current_words else 0)
 
             if current_words and current_width + needed > max_width:
-                # احفظ السطر الحالي (مع عكس ترتيب الكلمات للـ RTL)
                 lines.append(" ".join(reversed(current_words)))
                 current_words = [shaped_word]
                 current_width = word_width
@@ -314,7 +291,6 @@ class SubtitleEngine:
                 current_words.append(shaped_word)
                 current_width += needed
 
-        # السطر الأخير
         if current_words:
             lines.append(" ".join(reversed(current_words)))
 
@@ -337,7 +313,6 @@ class SubtitleEngine:
         emphasis_words: List[str],
     ) -> bool:
         """فحص ما إذا كان السطر يحتوي على كلمة مهمة."""
-        # نتحقق من النص الأصلي (ليس المُعالَج)
         return any(word and word in original_text for word in emphasis_words)
 
     # ════════════════════════════════════════════════════════════════
@@ -357,7 +332,6 @@ class SubtitleEngine:
         gd = ImageDraw.Draw(glow)
         r, g, b = color[:3]
 
-        # طبقات متعددة للـ glow
         for offset in [3, 6, 9]:
             for dx, dy in [(offset, 0), (-offset, 0), (0, offset), (0, -offset)]:
                 gd.text(
@@ -367,7 +341,6 @@ class SubtitleEngine:
                     fill=(r, g, b, 30),
                 )
 
-        # Blur للحصول على glow ناعم
         blurred = glow.filter(ImageFilter.GaussianBlur(12))
         img.alpha_composite(blurred)
 
@@ -383,7 +356,6 @@ class SubtitleEngine:
         bbox = draw.textbbox((x, y), text, font=font)
         padding = 12
 
-        # خلفية صفراء مع زوايا دائرية
         draw.rounded_rectangle(
             [
                 bbox[0] - padding,
@@ -395,7 +367,6 @@ class SubtitleEngine:
             fill=(255, 200, 0, 220),
         )
 
-        # النص
         draw.text(
             (x, y),
             text,
@@ -414,7 +385,6 @@ class SubtitleEngine:
         line_height: int,
     ) -> None:
         """رسم خلفية شفافة خلف النص."""
-        # حساب أبعاد كل الأسطر
         max_width = 0
         for line in lines:
             bbox = draw.textbbox((0, 0), line, font=font)
@@ -440,10 +410,8 @@ class SubtitleEngine:
     # ════════════════════════════════════════════════════════════════
     def _get_style(self, scene_type: str, text: str = "") -> dict:
         """الحصول على نمط حسب نوع المشهد."""
-        # اختيار حجم الخط حسب طول النص
         word_count = len(text.split()) if text else 0
 
-        # auto-sizing
         if scene_type in ("hook", "peak"):
             font = self.font_lg if word_count <= 6 else self.font_md
         elif word_count > 10:
@@ -455,7 +423,7 @@ class SubtitleEngine:
             "hook": dict(
                 font=font,
                 text_color=(255, 255, 255, 255),
-                glow_color=(220, 30, 30),       # أحمر
+                glow_color=(220, 30, 30),
                 y_pos=0.44,
                 stroke_w=3,
                 stroke_c=(0, 0, 0, 255),
@@ -464,7 +432,7 @@ class SubtitleEngine:
             "build": dict(
                 font=font,
                 text_color=(240, 240, 240, 255),
-                glow_color=(80, 80, 220),        # أزرق
+                glow_color=(80, 80, 220),
                 y_pos=0.55,
                 stroke_w=2,
                 stroke_c=(0, 0, 0, 255),
@@ -472,7 +440,7 @@ class SubtitleEngine:
             ),
             "peak": dict(
                 font=font,
-                text_color=(255, 215, 0, 255),   # ذهبي
+                text_color=(255, 215, 0, 255),
                 glow_color=(255, 180, 0),
                 y_pos=0.50,
                 stroke_w=3,
@@ -481,7 +449,7 @@ class SubtitleEngine:
             ),
             "resolution": dict(
                 font=font,
-                text_color=(200, 230, 255, 255),  # أزرق فاتح
+                text_color=(200, 230, 255, 255),
                 glow_color=(40, 130, 255),
                 y_pos=0.55,
                 stroke_w=2,
@@ -491,7 +459,7 @@ class SubtitleEngine:
             "cta": dict(
                 font=font,
                 text_color=(255, 255, 255, 255),
-                glow_color=(255, 255, 255),     # أبيض
+                glow_color=(255, 255, 255),
                 y_pos=0.73,
                 stroke_w=2,
                 stroke_c=(0, 0, 0, 255),
@@ -500,7 +468,7 @@ class SubtitleEngine:
             "main": dict(
                 font=font,
                 text_color=(255, 255, 255, 255),
-                glow_color=(180, 180, 180),     # رمادي
+                glow_color=(180, 180, 180),
                 y_pos=0.55,
                 stroke_w=2,
                 stroke_c=(0, 0, 0, 255),
@@ -519,7 +487,7 @@ class SubtitleEngine:
         output_path: str,
         scene_type: str = "main",
     ) -> str:
-        """رسم نص واحد كـ PNG (للاختبار أو الاستخدام المباشر)."""
+        """رسم نص واحد كـ PNG."""
         scene = {
             "text": text,
             "type": scene_type,
@@ -538,27 +506,3 @@ class SubtitleEngine:
                 logger.info(f"🧹 تم تنظيف {count} ملف ترجمة")
         except Exception as e:
             logger.warning(f"⚠ فشل التنظيف: {e}")
-
-
-# ════════════════════════════════════════════════════════════════════════
-#                    اختبار سريع
-# ════════════════════════════════════════════════════════════════════════
-if __name__ == "__main__":
-    import sys
-
-    if len(sys.argv) < 2:
-        print("Usage: python subtitle_engine.py <text> [type] [output.png]")
-        print("Types: hook, build, peak, resolution, cta, main")
-        sys.exit(1)
-
-    text = sys.argv[1]
-    scene_type = sys.argv[2] if len(sys.argv) > 2 else "main"
-    output = sys.argv[3] if len(sys.argv) > 3 else "test_subtitle.png"
-
-    try:
-        engine = SubtitleEngine()
-        engine.render_text(text, output, scene_type)
-        print(f"✓ تم: {output}")
-    except RuntimeError as e:
-        print(e)
-        sys.exit(1)
