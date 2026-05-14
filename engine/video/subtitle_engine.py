@@ -149,12 +149,14 @@ class SubtitleEngine:
         return text
 
     def _find_font(self) -> Optional[str]:
+        """البحث عن خط عربي متاح."""
         for path in self.FONT_PATHS:
             if Path(path).exists():
                 return path
         return None
 
     def _load_fonts(self) -> None:
+        """تحميل الخطوط بالأحجام المختلفة."""
         try:
             self.font_lg = ImageFont.truetype(self.font_path, self.font_size_lg)
             self.font_md = ImageFont.truetype(self.font_path, self.font_size_md)
@@ -163,6 +165,7 @@ class SubtitleEngine:
             raise RuntimeError(f"❌ فشل تحميل الخط {self.font_path}: {e}")
 
     def render_all_scenes(self, script: dict) -> List[Tuple[str, dict]]:
+        """رسم الترجمة لكل مشاهد السكربت."""
         scenes = script.get("scenes", [])
 
         if not scenes:
@@ -181,6 +184,7 @@ class SubtitleEngine:
         return results
 
     def _render_png(self, scene: dict, idx: int) -> str:
+        """رسم ترجمة مشهد واحد كـ PNG."""
         text = scene.get("text", "").strip()
         scene_type = scene.get("type", "main")
         emphasis_words = [e.get("word", "") for e in scene.get("emphasis", [])]
@@ -247,8 +251,7 @@ class SubtitleEngine:
 
         img.save(output, "PNG")
         return output
-
-    def _wrap_arabic(
+            def _wrap_arabic(
         self,
         text: str,
         font: ImageFont.FreeTypeFont,
@@ -302,6 +305,7 @@ class SubtitleEngine:
         text: str,
         font: ImageFont.FreeTypeFont,
     ) -> int:
+        """قياس عرض النص."""
         bbox = draw.textbbox((0, 0), text, font=font)
         return bbox[2] - bbox[0]
 
@@ -311,6 +315,7 @@ class SubtitleEngine:
         original_text: str,
         emphasis_words: List[str],
     ) -> bool:
+        """فحص ما إذا كان السطر يحتوي على كلمة مهمة."""
         return any(word and word in original_text for word in emphasis_words)
 
     def _draw_glow(
@@ -322,6 +327,7 @@ class SubtitleEngine:
         y: int,
         color: tuple,
     ) -> None:
+        """رسم تأثير Glow حول النص."""
         glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
         gd = ImageDraw.Draw(glow)
         r, g, b = color[:3]
@@ -346,6 +352,7 @@ class SubtitleEngine:
         x: int,
         y: int,
     ) -> None:
+        """رسم نص بخلفية صفراء (highlight)."""
         bbox = draw.textbbox((x, y), text, font=font)
         padding = 12
 
@@ -377,6 +384,7 @@ class SubtitleEngine:
         start_y: int,
         line_height: int,
     ) -> None:
+        """رسم خلفية شفافة خلف النص."""
         max_width = 0
         for line in lines:
             bbox = draw.textbbox((0, 0), line, font=font)
@@ -398,6 +406,7 @@ class SubtitleEngine:
         )
 
     def _get_style(self, scene_type: str, text: str = "") -> dict:
+        """الحصول على نمط حسب نوع المشهد."""
         word_count = len(text.split()) if text else 0
 
         if scene_type in ("hook", "peak"):
@@ -429,4 +438,50 @@ class SubtitleEngine:
             "peak": dict(
                 font=font,
                 text_color=(255, 215, 0, 255),
-                glow_color=(255
+                glow_color=(255, 180, 0),
+                y_pos=0.50,
+                stroke_w=3,
+                stroke_c=(80, 40, 0, 255),
+                shadow=5,
+            ),
+            "resolution": dict(
+                font=font,
+                text_color=(200, 230, 255, 255),
+                glow_color=(40, 130, 255),
+                y_pos=0.55,
+                stroke_w=2,
+                stroke_c=(0, 0, 0, 255),
+                shadow=3,
+            ),
+            "cta": dict(
+                font=font,
+                text_color=(255, 255, 255, 255),
+                glow_color=(255, 255, 255),
+                y_pos=0.73,
+                stroke_w=2,
+                stroke_c=(0, 0, 0, 255),
+                shadow=3,
+            ),
+            "main": dict(
+                font=font,
+                text_color=(255, 255, 255, 255),
+                glow_color=(180, 180, 180),
+                y_pos=0.55,
+                stroke_w=2,
+                stroke_c=(0, 0, 0, 255),
+                shadow=3,
+            ),
+        }
+
+        return styles.get(scene_type, styles["main"])
+
+    def render_text(
+        self,
+        text: str,
+        output_path: str,
+        scene_type: str = "main",
+    ) -> str:
+        """رسم نص واحد كـ PNG."""
+        scene = {
+            "text": text,
+            "type
