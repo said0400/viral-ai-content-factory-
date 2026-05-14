@@ -1,13 +1,9 @@
 """
-📜 Subtitle Engine — الترجمة العربية الاحترافية (Fixed v2)
+📜 Subtitle Engine — الترجمة العربية الاحترافية (Fixed v3)
 ═══════════════════════════════════════════════════════════════
-محرك ترجمة متقدم يدعم:
-  ✓ العربية الكاملة (RTL + reshape + bidi)
-  ✓ 6 أنماط مختلفة (hook/build/peak/resolution/cta/main)
-  ✓ Glow + Shadow + Highlight سينمائي
-  ✓ تخصيص كامل من .env
-  ✓ Auto-sizing حسب طول النص
-  ✓ Fallback ذكي للخطوط
+✓ يستخدم Amiri كخط أساسي (أفضل دعم للاتصال العربي)
+✓ Reshaper config محسّن للاتصال
+✓ Pillow text shaping صحيح
 ═══════════════════════════════════════════════════════════════
 """
 
@@ -45,29 +41,28 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 class SubtitleEngine:
     """محرك الترجمة العربية الاحترافية."""
 
+    # ⭐ ترتيب جديد: أفضل خطوط للاتصال أولاً
     FONT_PATHS = [
-        "engine/assets/fonts/Tajawal-ExtraBold.ttf",
-        "engine/assets/fonts/Tajawal-Bold.ttf",
+        # 🥇 الأفضل للاتصال العربي
+        "engine/assets/fonts/Amiri-Bold.ttf",
+        "engine/assets/fonts/NotoNaskhArabic-VF.ttf",
+        "engine/assets/fonts/Cairo-VF.ttf",
+        # 🥈 جيد لكن أقل
+        "engine/assets/fonts/Amiri-Regular.ttf",
         "engine/assets/fonts/Almarai-ExtraBold.ttf",
         "engine/assets/fonts/Almarai-Bold.ttf",
-        "engine/assets/fonts/Amiri-Bold.ttf",
-        "engine/assets/fonts/Cairo-VF.ttf",
+        "engine/assets/fonts/Tajawal-ExtraBold.ttf",
+        "engine/assets/fonts/Tajawal-Bold.ttf",
         "engine/assets/fonts/Changa-VF.ttf",
-        "engine/assets/fonts/NotoNaskhArabic-VF.ttf",
+        # خطوط Regular
         "engine/assets/fonts/Tajawal-Regular.ttf",
         "engine/assets/fonts/Almarai-Regular.ttf",
-        "engine/assets/fonts/Amiri-Regular.ttf",
-        "engine/assets/fonts/Cairo-Bold.ttf",
-        "engine/assets/fonts/Cairo.ttf",
-        "engine/assets/fonts/Tajawal.ttf",
-        "engine/assets/fonts/Changa.ttf",
-        "engine/assets/fonts/NotoNaskhArabic.ttf",
+        # خطوط النظام (Linux)
         "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
 
     DEFAULT_SIZES = {
@@ -97,12 +92,61 @@ class SubtitleEngine:
         if not self.font_path:
             raise RuntimeError(
                 "❌ لم يُعثر على خط عربي!\n"
-                "   1. شغّل: python download_fonts.py\n"
-                "   2. أو ثبّت: apt install fonts-noto-core"
+                "   1. شغّل: python download_fonts.py"
             )
 
+        self._init_reshaper()
         self._load_fonts()
         logger.info(f"📜 SubtitleEngine | Font: {Path(self.font_path).name}")
+
+    def _init_reshaper(self):
+        """تهيئة reshaper محسّن للاتصال العربي."""
+        self.reshaper = None
+        if RESHAPER_OK:
+            try:
+                configuration = {
+                    'delete_harakat': False,
+                    'support_ligatures': True,
+                    'language': 'Arabic',
+                    'shift_harakat_position': False,
+                    'use_unshaped_instead_of_isolated': False,
+                }
+                self.reshaper = arabic_reshaper.ArabicReshaper(
+                    configuration=configuration
+                )
+                logger.info("✓ Arabic reshaper initialized with ligatures")
+            except Exception as e:
+                logger.warning(f"⚠ فشل إنشاء reshaper مخصص: {e}")
+                self.reshaper = None
+
+    def _reshape_text(self, text: str) -> str:
+        """تطبيق reshape على النص العربي."""
+        if not RESHAPER_OK:
+            return text
+        try:
+            if self.reshaper:
+                return self.reshaper.reshape(text)
+            else:
+                return arabic_reshaper.reshape(text)
+        except Exception as e:
+            logger.debug(f"reshape failed: {e}")
+            return text
+
+    def _bidi_text(self, text: str) -> str:
+        """تطبيق bidi على النص العربي."""
+        if not BIDI_OK:
+            return text
+        try:
+            return get_display(text)
+        except Exception as e:
+            logger.debug(f"bidi failed: {e}")
+            return text
+
+    def _shape_arabic(self, text: str) -> str:
+        """معالجة كاملة للنص العربي (reshape + bidi)."""
+        text = self._reshape_text(text)
+        text = self._bidi_text(text)
+        return text
 
     def _find_font(self) -> Optional[str]:
         for path in self.FONT_PATHS:
@@ -212,8 +256,8 @@ class SubtitleEngine:
     ) -> List[str]:
         """
         تقسيم النص العربي على أسطر بشكل صحيح:
-          1. تقسيم النص إلى أسطر بناءً على العرض (قبل reshape)
-          2. تطبيق reshape + bidi على كل سطر كاملاً (ليس كلمة بكلمة)
+          1. تقسيم النص إلى أسطر بناءً على العرض
+          2. تطبيق reshape + bidi على كل سطر كاملاً
         """
         if not text or not text.strip():
             return [""]
@@ -232,18 +276,7 @@ class SubtitleEngine:
             test_words = current_words + [word]
             test_text = " ".join(test_words)
 
-            shaped_test = test_text
-            if RESHAPER_OK:
-                try:
-                    shaped_test = arabic_reshaper.reshape(test_text)
-                except Exception:
-                    pass
-            if BIDI_OK:
-                try:
-                    shaped_test = get_display(shaped_test)
-                except Exception:
-                    pass
-
+            shaped_test = self._shape_arabic(test_text)
             test_width = self._text_width(test_draw, shaped_test, font)
 
             if current_words and test_width > max_width:
@@ -255,19 +288,10 @@ class SubtitleEngine:
         if current_words:
             raw_lines.append(" ".join(current_words))
 
+        # ⭐ معالجة كل سطر كاملاً (الحل الصحيح للاتصال)
         display_lines = []
         for raw_line in raw_lines:
-            shaped_line = raw_line
-            if RESHAPER_OK:
-                try:
-                    shaped_line = arabic_reshaper.reshape(raw_line)
-                except Exception as e:
-                    logger.debug(f"reshape failed: {e}")
-            if BIDI_OK:
-                try:
-                    shaped_line = get_display(shaped_line)
-                except Exception as e:
-                    logger.debug(f"bidi failed: {e}")
+            shaped_line = self._shape_arabic(raw_line)
             display_lines.append(shaped_line)
 
         return display_lines if display_lines else [""]
@@ -405,63 +429,4 @@ class SubtitleEngine:
             "peak": dict(
                 font=font,
                 text_color=(255, 215, 0, 255),
-                glow_color=(255, 180, 0),
-                y_pos=0.50,
-                stroke_w=3,
-                stroke_c=(80, 40, 0, 255),
-                shadow=5,
-            ),
-            "resolution": dict(
-                font=font,
-                text_color=(200, 230, 255, 255),
-                glow_color=(40, 130, 255),
-                y_pos=0.55,
-                stroke_w=2,
-                stroke_c=(0, 0, 0, 255),
-                shadow=3,
-            ),
-            "cta": dict(
-                font=font,
-                text_color=(255, 255, 255, 255),
-                glow_color=(255, 255, 255),
-                y_pos=0.73,
-                stroke_w=2,
-                stroke_c=(0, 0, 0, 255),
-                shadow=3,
-            ),
-            "main": dict(
-                font=font,
-                text_color=(255, 255, 255, 255),
-                glow_color=(180, 180, 180),
-                y_pos=0.55,
-                stroke_w=2,
-                stroke_c=(0, 0, 0, 255),
-                shadow=3,
-            ),
-        }
-
-        return styles.get(scene_type, styles["main"])
-
-    def render_text(
-        self,
-        text: str,
-        output_path: str,
-        scene_type: str = "main",
-    ) -> str:
-        scene = {
-            "text": text,
-            "type": scene_type,
-            "emphasis": [],
-        }
-        return self._render_png(scene, 0)
-
-    def cleanup(self) -> None:
-        try:
-            count = 0
-            for f in self.sub_dir.glob("*.png"):
-                f.unlink(missing_ok=True)
-                count += 1
-            if count:
-                logger.info(f"🧹 تم تنظيف {count} ملف ترجمة")
-        except Exception as e:
-            logger.warning(f"⚠ فشل التنظيف: {e}")
+                glow_color=(255
