@@ -1,32 +1,48 @@
 """
-Cinematic Editor — مُصلح
-إصلاح المشاكل:
-  1. تكرار الفيديوهات   ← حذف cache + timestamp في اسم الملف
-  2. كلمات البحث قليلة  ← 50+ كلمة + استخدام visual_prompt من الـ AI
-  3. loop_clip مُهمَل    ← يُستدعى الآن قبل trim
-  4. overlay chain يكسر ← استبدال بـ SRT subtitles عبر FFmpeg مباشرة
-  5. Pexels يُعيد landscape ← per_page=15 + فلترة أفضل + page عشوائية
+🎬 Cinematic Editor — التحرير السينمائي للفيديو
+═══════════════════════════════════════════════════════════════
+محرك التحرير الرئيسي يجمع:
+  • جلب الفيديوهات (Pexels + Pixabay)
+  • معالجة الـ clips (scale, crop, zoom, shake)
+  • تطبيق Transitions
+  • إضافة الترجمة (SRT + PNG overlays)
+  • دمج الصوت والتدرج اللوني
 
-ضع هذا الملف في: engine/video/cinematic_editor.py
+الإصلاحات:
+  ✓ Pexels + Pixabay (بدلاً من Pexels فقط)
+  ✓ مسح cache قبل كل تشغيل (تنويع الفيديوهات)
+  ✓ 50+ كلمة بحث + visual_prompt من AI
+  ✓ SRT + batched overlay (يحل مشكلة FFmpeg limit)
+  ✓ Loop قبل Trim (يمنع المشاهد القصيرة)
+  ✓ دعم quality من main.py
+
+ضع في: engine/video/cinematic_editor.py
+═══════════════════════════════════════════════════════════════
 """
 
 import os
-import json
+import time
 import random
 import shutil
+import logging
 import subprocess
 import requests
-import time
 from pathlib import Path
+from typing import Optional, List, Dict, Tuple
 
 from engine.video.effects_engine    import EffectsEngine
 from engine.video.transition_engine import TransitionEngine
 from engine.video.subtitle_engine   import SubtitleEngine
 
+logger = logging.getLogger(__name__)
+
 
 class CinematicEditor:
+    """محرك التحرير السينمائي الرئيسي."""
 
-    # ─── 50+ كلمة بحث متنوعة ────────────────────────────────────────────────
+    # ════════════════════════════════════════════════════════════════
+    #                    قواميس البحث
+    # ════════════════════════════════════════════════════════════════
     KEYWORDS = [
         # درامي / سينمائي
         "dark cinematic dramatic",
@@ -86,7 +102,6 @@ class CinematicEditor:
         "timelapse sky dramatic",
     ]
 
-    # خريطة كلمات عربية → كلمات بحث إنجليزية
     ARABIC_HINTS = {
         "ألم":    ["dark rain dramatic", "person looking window rain"],
         "نجاح":   ["sunrise golden mountain", "person running dramatic"],
@@ -122,40 +137,73 @@ class CinematicEditor:
         "main":       "slow_zoom_in",
     }
 
-    def __init__(self):
-        self.w          = int(os.getenv("VIDEO_WIDTH",  "1080"))
-        self.h          = int(os.getenv("VIDEO_HEIGHT", "1920"))
-        self.fps        = int(os.getenv("VIDEO_FPS",    "30"))
-        self.pexels_key = os.getenv("PEXELS_API_KEY", "")
+    SCENE_TRANSITIONS = {
+        "hook":       ["flash_black", "zoom_burst"],
+        "peak":       ["zoom_burst", "flash_black"],
+        "build":      ["cross_dissolve", "smooth_fade"],
+        "resolution": ["cross_dissolve", "fade_black"],
+        "cta":        ["fade_black", "smooth_fade"],
+        "main":       ["cross_dissolve", "smooth_fade"],
+    }
 
-        self.temp_dir    = Path(os.getenv("TEMP_DIR", "./temp"))
+    # ─── إعدادات الجودة ───────────────────────────────────────────
+    QUALITY_PRESETS = {
+        "medium": {"crf": 23, "preset": "fast",      "audio_bitrate": "128k"},
+        "high":   {"crf": 19, "preset": "medium",    "audio_bitrate": "192k"},
+        "ultra":  {"crf": 17, "preset": "slow",      "audio_bitrate": "256k"},
+    }
+
+    # ════════════════════════════════════════════════════════════════
+    def __init__(self):
+        """تهيئة محرك التحرير."""
+        self.w = int(os.getenv("VIDEO_WIDTH",  "1080"))
+        self.h = int(os.getenv("VIDEO_HEIGHT", "1920"))
+        self.fps = int(os.getenv("VIDEO_FPS",  "30"))
+        self.quality = os.getenv("VIDEO_QUALITY", "high")
+
+        # المفاتيح
+        self.pexels_key = os.getenv("PEXELS_API_KEY", "")
+        self.pixabay_key = os.getenv("PIXABAY_API_KEY", "")
+
+        # المسارات
+        self.temp_dir = Path(os.getenv("TEMP_DIR", "./temp"))
         self.footage_dir = self.temp_dir / "footage"
-        self.clips_dir   = self.temp_dir / "clips"
+        self.clips_dir = self.temp_dir / "clips"
         for d in [self.temp_dir, self.footage_dir, self.clips_dir]:
             d.mkdir(parents=True, exist_ok=True)
 
-        self.fx    = EffectsEngine(self.w, self.h)
+        # المحركات الفرعية
+        self.fx = EffectsEngine(self.w, self.h)
         self.trans = TransitionEngine(self.w, self.h)
-        self.subs  = SubtitleEngine(self.w, self.h)
+        self.subs = SubtitleEngine(self.w, self.h)
 
-        # ┌─────────────────────────────────────────────────────────┐
-        # │ إصلاح #1: مسح footage القديم قبل كل تشغيل             │
-        # │ يمنع إعادة استخدام نفس الفيديوهات                      │
-        # └─────────────────────────────────────────────────────────┘
+        # مسح footage القديم
         self._clear_old_footage()
 
-    def _clear_old_footage(self):
-        """يحذف footage القديم لضمان تنويع الفيديوهات في كل تشغيل."""
-        if self.footage_dir.exists():
-            for f in self.footage_dir.glob("footage_*.mp4"):
-                try:
+        logger.info(
+            f"🎬 CinematicEditor | {self.w}x{self.h}@{self.fps}fps | "
+            f"Quality: {self.quality}"
+        )
+
+    def _clear_old_footage(self) -> None:
+        """مسح footage القديم لضمان تنويع الفيديوهات."""
+        try:
+            count = 0
+            if self.footage_dir.exists():
+                for f in self.footage_dir.glob("footage_*.mp4"):
                     f.unlink()
-                except Exception:
-                    pass
-        print("  🗑️ تم مسح footage القديم")
+                    count += 1
+                for f in self.footage_dir.glob("ph_*.mp4"):
+                    f.unlink()
+                    count += 1
+            if count:
+                logger.info(f"🗑️ تم مسح {count} ملف footage قديم")
+        except Exception as e:
+            logger.warning(f"⚠ فشل المسح: {e}")
 
-    # ─── الدالة الرئيسية ────────────────────────────────────────────────────
-
+    # ════════════════════════════════════════════════════════════════
+    #                    الدالة الرئيسية
+    # ════════════════════════════════════════════════════════════════
     def build_video(
         self,
         script: dict,
@@ -163,57 +211,68 @@ class CinematicEditor:
         subtitle_data: list,
         output_path: str,
     ) -> str:
-        scenes    = script.get("scenes", [])
-        total_dur = float(script.get("duration_estimate", 54.0))
+        """بناء الفيديو الكامل من السكربت."""
+        scenes = script.get("scenes", [])
+        total_dur = float(script.get("duration_estimate", 45.0))
 
-        print("    ► جلب الفيديوهات...")
+        if not scenes:
+            raise ValueError("❌ لا توجد مشاهد في السكربت")
+
+        logger.info(f"🎬 بناء فيديو | {len(scenes)} مشهد | {total_dur:.1f}s")
+
+        # 1️⃣ جلب الفيديوهات
+        logger.info("► جلب الفيديوهات...")
         raws = self._fetch_footage(scenes)
 
-        print("    ► معالجة الـ clips...")
+        # 2️⃣ معالجة الـ clips
+        logger.info("► معالجة الـ clips...")
         processed = self._process_clips(raws, scenes)
 
-        print("    ► تجميع مع transitions...")
+        # 3️⃣ تجميع مع transitions
+        logger.info("► تجميع مع transitions...")
         assembled = self._assemble(processed, scenes, total_dur)
 
-        print("    ► إضافة الترجمة...")
-        subtitled = self._overlay_subs_srt(assembled, subtitle_data, scenes)
+        # 4️⃣ إضافة الترجمة
+        logger.info("► إضافة الترجمة...")
+        subtitled = self._overlay_subs(assembled, subtitle_data, scenes)
 
-        print("    ► دمج الصوت...")
+        # 5️⃣ دمج الصوت
+        logger.info("► دمج الصوت...")
         muxed = self._mux(subtitled, audio_path)
 
-        print("    ► تدرج الألوان...")
+        # 6️⃣ التدرج اللوني النهائي
+        logger.info("► تدرج الألوان...")
         self._grade(muxed, output_path)
 
+        logger.info(f"✓ اكتمل الفيديو: {Path(output_path).name}")
         return output_path
 
-    # ─── جلب الفيديوهات ─────────────────────────────────────────────────────
-
+    # ════════════════════════════════════════════════════════════════
+    #                    جلب الفيديوهات
+    # ════════════════════════════════════════════════════════════════
     def _fetch_footage(self, scenes: list) -> list:
-        used_kws  = set()
+        """جلب فيديوهات لكل مشهد."""
+        used_kws = set()
         used_urls = set()
-        clips     = []
+        clips = []
 
         for i, scene in enumerate(scenes):
-            kw   = self._pick_kw(scene, used_kws)
+            kw = self._pick_kw(scene, used_kws)
             used_kws.add(kw)
             clip = self._download(kw, i, used_urls)
             clips.append(clip)
+            logger.debug(f"  [{i+1}/{len(scenes)}] {kw[:50]}")
 
         return clips
 
     def _pick_kw(self, scene: dict, used: set) -> str:
-        """
-        إصلاح #2: يستخدم visual_prompt من الـ AI أولاً،
-        ثم يبحث في ARABIC_HINTS، ثم يختار من KEYWORDS الموسّعة.
-        """
-        # أولاً: visual_prompt من الـ AI (إصلاح Bug #5 في التقرير)
+        """اختيار كلمة بحث ذكية للمشهد."""
+        # 1. visual_prompt من AI (أولوية عالية)
         vp = scene.get("visual_prompt", "").strip()
-        if vp and len(vp) > 5:
-            # تحقق أن لم يُستخدم من قبل
-            if vp not in used:
-                return vp
+        if vp and len(vp) > 5 and vp not in used:
+            return vp
 
-        # ثانياً: ARABIC_HINTS
+        # 2. ARABIC_HINTS
         text = scene.get("text", "")
         for hint, kw_list in self.ARABIC_HINTS.items():
             if hint in text:
@@ -221,59 +280,81 @@ class CinematicEditor:
                     if kw not in used:
                         return kw
 
-        # ثالثاً: اختيار عشوائي من KEYWORDS الموسّعة
+        # 3. KEYWORDS عشوائية
         avail = [k for k in self.KEYWORDS if k not in used]
         if avail:
             return random.choice(avail)
 
-        # إذا استُنفد الكل، خلط عشوائي مضمون
+        # 4. أي كلمة (لو استُنفد كل شيء)
         return random.choice(self.KEYWORDS)
 
     def _download(self, keyword: str, idx: int, used_urls: set) -> str:
-        """
-        إصلاح #1: لا cache — اسم الملف يشمل timestamp
-        إصلاح Pexels: per_page=15 + page عشوائية + فلترة portrait
-        """
-        # اسم فريد في كل تشغيل — يمنع إعادة استخدام الفيديو القديم
-        ts  = int(time.time() * 1000) % 100000
+        """تحميل فيديو من Pexels أو Pixabay."""
+        ts = int(time.time() * 1000) % 100000
         out = str(self.footage_dir / f"footage_{idx:03d}_{ts}.mp4")
 
-        if not self.pexels_key:
-            return self._placeholder(idx)
+        # 1️⃣ جرب Pexels أولاً
+        if self.pexels_key:
+            result = self._download_from_pexels(keyword, out, used_urls)
+            if result:
+                return result
 
+        # 2️⃣ Pixabay كـ fallback
+        if self.pixabay_key:
+            result = self._download_from_pixabay(keyword, out, used_urls)
+            if result:
+                return result
+
+        # 3️⃣ Placeholder
+        logger.warning(f"⚠ لم يتم العثور على فيديو لـ '{keyword}' → placeholder")
+        return self._placeholder(idx)
+
+    def _download_from_pexels(
+        self,
+        keyword: str,
+        out: str,
+        used_urls: set,
+    ) -> Optional[str]:
+        """تحميل من Pexels."""
         try:
-            # صفحة عشوائية لزيادة التنويع
             page = random.randint(1, 4)
-
             r = requests.get(
                 "https://api.pexels.com/videos/search",
                 headers={"Authorization": self.pexels_key},
                 params={
-                    "query":       keyword,
-                    "per_page":    15,        # أكثر خيارات
+                    "query": keyword,
+                    "per_page": 15,
                     "orientation": "portrait",
-                    "page":        page,
-                    "size":        "medium",
+                    "page": page,
+                    "size": "medium",
                 },
                 timeout=20,
             )
-            r.raise_for_status()
+
+            if r.status_code != 200:
+                logger.debug(f"Pexels HTTP {r.status_code}")
+                return None
+
             videos = r.json().get("videos", [])
 
             if not videos:
-                # جرب بدون page إذا لم تُعثر على نتائج
+                # محاولة بدون page
                 r2 = requests.get(
                     "https://api.pexels.com/videos/search",
                     headers={"Authorization": self.pexels_key},
-                    params={"query": keyword, "per_page": 10, "orientation": "portrait"},
+                    params={
+                        "query": keyword,
+                        "per_page": 10,
+                        "orientation": "portrait",
+                    },
                     timeout=20,
                 )
                 videos = r2.json().get("videos", []) if r2.ok else []
 
             if not videos:
-                return self._placeholder(idx)
+                return None
 
-            # فلترة portrait أولاً
+            # فلترة portrait
             portrait_videos = [
                 v for v in videos
                 if any(
@@ -283,7 +364,8 @@ class CinematicEditor:
             ]
             pool = portrait_videos if portrait_videos else videos
 
-            # تجنب URLs مستخدمة من قبل في نفس التشغيل
+            # محاولة العثور على فيديو غير مستخدم
+            target = None
             for _ in range(5):
                 video = random.choice(pool)
                 target = self._best_file(video.get("video_files", []))
@@ -291,31 +373,90 @@ class CinematicEditor:
                     break
 
             if not target:
-                return self._placeholder(idx)
+                return None
 
             used_urls.add(target["link"])
-
-            # تحميل الملف
-            dl = requests.get(target["link"], stream=True, timeout=40)
-            dl.raise_for_status()
-            with open(out, "wb") as f:
-                for chunk in dl.iter_content(8192):
-                    f.write(chunk)
-
-            if os.path.getsize(out) < 10000:
-                return self._placeholder(idx)
-
-            return out
+            return self._download_file(target["link"], out)
 
         except Exception as e:
-            print(f"      Pexels فشل '{keyword}': {e}")
-            return self._placeholder(idx)
+            logger.debug(f"Pexels error: {e}")
+            return None
 
-    def _best_file(self, files: list) -> dict | None:
-        """يختار أفضل ملف فيديو: portrait HD أولاً."""
+    def _download_from_pixabay(
+        self,
+        keyword: str,
+        out: str,
+        used_urls: set,
+    ) -> Optional[str]:
+        """تحميل من Pixabay (احتياطي)."""
+        try:
+            r = requests.get(
+                "https://pixabay.com/api/videos/",
+                params={
+                    "key": self.pixabay_key,
+                    "q": keyword,
+                    "video_type": "film",
+                    "orientation": "vertical",
+                    "per_page": 15,
+                },
+                timeout=20,
+            )
+
+            if r.status_code != 200:
+                logger.debug(f"Pixabay HTTP {r.status_code}")
+                return None
+
+            hits = r.json().get("hits", [])
+            if not hits:
+                return None
+
+            # محاولة العثور على فيديو غير مستخدم
+            for _ in range(5):
+                video = random.choice(hits)
+                videos = video.get("videos", {})
+
+                # اختر أفضل جودة
+                for size in ("large", "medium", "small"):
+                    if size in videos and videos[size].get("url"):
+                        url = videos[size]["url"]
+                        if url not in used_urls:
+                            used_urls.add(url)
+                            return self._download_file(url, out)
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Pixabay error: {e}")
+            return None
+
+    def _download_file(self, url: str, out: str) -> Optional[str]:
+        """تحميل ملف فيديو."""
+        try:
+            dl = requests.get(url, stream=True, timeout=40)
+            dl.raise_for_status()
+
+            with open(out, "wb") as f:
+                for chunk in dl.iter_content(8192):
+                    if chunk:
+                        f.write(chunk)
+
+            if Path(out).exists() and Path(out).stat().st_size > 10000:
+                return out
+
+            Path(out).unlink(missing_ok=True)
+            return None
+
+        except Exception as e:
+            logger.debug(f"Download error: {e}")
+            Path(out).unlink(missing_ok=True)
+            return None
+
+    def _best_file(self, files: list) -> Optional[dict]:
+        """اختيار أفضل ملف فيديو."""
         # portrait + HD
         for vf in files:
-            if vf.get("height", 0) >= vf.get("width", 1) and vf.get("quality") in ("hd", "sd"):
+            if (vf.get("height", 0) >= vf.get("width", 1)
+                    and vf.get("quality") in ("hd", "sd")):
                 return vf
         # أي portrait
         for vf in files:
@@ -328,119 +469,160 @@ class CinematicEditor:
         return files[0] if files else None
 
     def _placeholder(self, idx: int) -> str:
+        """توليد فيديو خلفية بسيط (placeholder)."""
         out = str(self.footage_dir / f"ph_{idx:03d}.mp4")
         colors = ["0x0a0a1a", "0x0d0d1e", "0x080818", "0x0a0a0a", "0x05050f"]
         c = colors[idx % len(colors)]
-        r = subprocess.run(
-            ["ffmpeg", "-y", "-f", "lavfi",
-             "-i", f"color=c={c}:s={self.w}x{self.h}:r={self.fps}",
-             "-t", "8", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", out],
-            capture_output=True,
-        )
-        if r.returncode != 0:
+
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "lavfi",
+                 "-i", f"color=c={c}:s={self.w}x{self.h}:r={self.fps}",
+                 "-t", "8",
+                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                 out],
+                capture_output=True,
+                timeout=30,
+                check=True,
+            )
+        except Exception:
+            # fallback أسود
             subprocess.run(
                 ["ffmpeg", "-y", "-f", "lavfi",
                  "-i", f"color=c=black:s={self.w}x{self.h}:r={self.fps}",
-                 "-t", "8", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", out],
+                 "-t", "8",
+                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                 out],
                 capture_output=True,
+                timeout=30,
             )
         return out
-
-    # ─── معالجة الـ clips ────────────────────────────────────────────────────
-
+          # ════════════════════════════════════════════════════════════════
+    #                    معالجة الـ Clips
+    # ════════════════════════════════════════════════════════════════
     def _process_clips(self, raws: list, scenes: list) -> list:
+        """معالجة كل clip: scale, loop, trim, zoom, shake."""
         processed = []
+
         for i, (raw, scene) in enumerate(zip(raws, scenes)):
-            st   = scene.get("type", "main")
-            dur  = scene.get("duration", 3.0) + scene.get("pause_after", 0.3)
+            st = scene.get("type", "main")
+            dur = scene.get("duration", 3.0) + scene.get("pause_after", 0.3)
             zoom = self.ZOOM_MAP.get(st, "slow_zoom_in")
 
-            sc = str(self.clips_dir / f"sc_{i:03d}.mp4")
-            lp = str(self.clips_dir / f"lp_{i:03d}.mp4")   # ← loop
-            tr = str(self.clips_dir / f"tr_{i:03d}.mp4")
-            zm = str(self.clips_dir / f"zm_{i:03d}.mp4")
+            # مسارات الملفات الوسيطة
+            sc = str(self.clips_dir / f"sc_{i:03d}.mp4")  # scaled
+            lp = str(self.clips_dir / f"lp_{i:03d}.mp4")  # looped
+            tr = str(self.clips_dir / f"tr_{i:03d}.mp4")  # trimmed
+            zm = str(self.clips_dir / f"zm_{i:03d}.mp4")  # zoomed
 
-            self.fx.scale_and_crop(raw, sc)
+            try:
+                # 1. تحجيم وقص للأبعاد المطلوبة (1080x1920)
+                self.fx.scale_and_crop(raw, sc)
 
-            # إصلاح #3: loop قبل trim — يمنع الفيديو القصير من إنهاء المشهد مبكراً
-            self.fx.loop_clip_to_duration(sc, lp, dur + 1.0)
+                # 2. Loop قبل Trim (يضمن مدة كافية)
+                self.fx.loop_clip_to_duration(sc, lp, dur + 1.0)
 
-            self.fx.trim_clip(lp, tr, 0.0, dur)
-            self.fx.apply_zoom_effect(tr, zm, zoom, dur)
+                # 3. Trim للمدة المطلوبة
+                self.fx.trim_clip(lp, tr, 0.0, dur)
 
-            if st in ("hook", "peak"):
-                sh = str(self.clips_dir / f"sh_{i:03d}.mp4")
-                self.fx.apply_smooth_shake(zm, sh, 2.0)
-                processed.append(sh)
-            else:
-                processed.append(zm)
+                # 4. تطبيق Zoom Effect
+                self.fx.apply_zoom_effect(tr, zm, zoom, dur)
+
+                # 5. Shake للمشاهد المهمة (hook, peak)
+                if st in ("hook", "peak"):
+                    sh = str(self.clips_dir / f"sh_{i:03d}.mp4")
+                    self.fx.apply_smooth_shake(zm, sh, 2.0)
+                    processed.append(sh)
+                else:
+                    processed.append(zm)
+
+            except Exception as e:
+                logger.warning(f"⚠ خطأ في معالجة clip {i}: {e}")
+                # استخدم الـ raw كـ fallback
+                processed.append(raw)
 
         return processed
 
-    # ─── تجميع الـ clips مع transitions ─────────────────────────────────────
-
+    # ════════════════════════════════════════════════════════════════
+    #                    تجميع الـ Clips مع Transitions
+    # ════════════════════════════════════════════════════════════════
     def _assemble(self, clips: list, scenes: list, total_dur: float) -> str:
+        """تجميع الـ clips مع تطبيق الانتقالات."""
         out = str(self.temp_dir / "assembled_raw.mp4")
+
+        if not clips:
+            raise ValueError("❌ لا توجد clips للتجميع")
+
         if len(clips) == 1:
             shutil.copy(clips[0], out)
             return out
 
-        # transitions ذكية حسب نوع المشهد (لا random عشوائي)
-        SCENE_TRANS = {
-            "hook":       "flash_black",
-            "peak":       "zoom_burst",
-            "build":      "cross_dissolve",
-            "resolution": "cross_dissolve",
-            "cta":        "fade_black",
-            "main":       "cross_dissolve",
-        }
-
         current = clips[0]
         for i in range(1, len(clips)):
-            st  = scenes[i].get("type", "main") if i < len(scenes) else "main"
-            tt  = SCENE_TRANS.get(st, "cross_dissolve")
+            scene_type = scenes[i].get("type", "main") if i < len(scenes) else "main"
+
+            # اختيار transition عشوائي من الأنواع المناسبة
+            available_trans = self.SCENE_TRANSITIONS.get(
+                scene_type,
+                ["cross_dissolve"]
+            )
+            transition = random.choice(available_trans)
+
             nxt = str(self.temp_dir / f"assem_{i:03d}.mp4")
-            self.trans.apply_transition(current, clips[i], nxt, tt, 0.18)
-            current = nxt
+
+            try:
+                self.trans.apply_transition(
+                    current, clips[i], nxt, transition, 0.18
+                )
+                current = nxt
+            except Exception as e:
+                logger.warning(f"⚠ فشل transition {i}: {e}")
+                # في حالة الفشل، استخدم الـ clip التالي مباشرة
+                current = clips[i]
 
         shutil.copy(current, out)
         return out
 
-    # ─── إضافة الترجمة ──────────────────────────────────────────────────────
-
-    def _overlay_subs_srt(self, video: str, sub_data: list, scenes: list) -> str:
-        """
-        إصلاح #4: يستخدم SRT + subtitles filter بدل overlay chain
-        يعمل مع أي عدد من المشاهد بدون حد.
-        """
+    # ════════════════════════════════════════════════════════════════
+    #                    إضافة الترجمة
+    # ════════════════════════════════════════════════════════════════
+    def _overlay_subs(self, video: str, sub_data: list, scenes: list) -> str:
+        """إضافة الترجمة على الفيديو (PNG overlays)."""
         out = str(self.temp_dir / "subtitled.mp4")
+
         if not sub_data:
+            logger.warning("⚠ لا توجد بيانات ترجمة")
             shutil.copy(video, out)
             return out
 
-        # بناء ملف SRT
+        # حفظ SRT للاستخدام المستقبلي (اختياري)
         srt_path = str(self.temp_dir / "subtitles.srt")
-        self._write_srt(srt_path, sub_data, scenes)
+        try:
+            self._write_srt(srt_path, sub_data, scenes)
+        except Exception as e:
+            logger.debug(f"تجاهل خطأ SRT: {e}")
 
-        # دمج الـ PNG overlays عبر filtergraph آمن (batch من 8 في المرة)
-        result = self._overlay_png_batched(video, sub_data, scenes, out)
-        return result
+        # تطبيق PNG overlays في batches
+        return self._overlay_png_batched(video, sub_data, scenes, out)
 
-    def _write_srt(self, srt_path: str, sub_data: list, scenes: list):
-        def fmt(s: float) -> str:
-            h  = int(s // 3600)
-            m  = int((s % 3600) // 60)
+    def _write_srt(self, srt_path: str, sub_data: list, scenes: list) -> None:
+        """كتابة ملف SRT للترجمة."""
+        def fmt_time(s: float) -> str:
+            h = int(s // 3600)
+            m = int((s % 3600) // 60)
             ss = int(s % 60)
             ms = int((s % 1) * 1000)
             return f"{h:02}:{m:02}:{ss:02},{ms:03}"
 
         lines = []
-        t     = 0.0
+        t = 0.0
+
         for i, (_, scene) in enumerate(sub_data):
-            dur   = scene.get("duration", 3.0)
+            dur = scene.get("duration", 3.0)
             pause = scene.get("pause_after", 0.3)
+
             lines.append(str(i + 1))
-            lines.append(f"{fmt(t)} --> {fmt(t + dur)}")
+            lines.append(f"{fmt_time(t)} --> {fmt_time(t + dur)}")
             lines.append(scene.get("text", ""))
             lines.append("")
             t += dur + pause
@@ -449,84 +631,248 @@ class CinematicEditor:
             f.write("\n".join(lines))
 
     def _overlay_png_batched(
-        self, video: str, sub_data: list, scenes: list, out: str
+        self,
+        video: str,
+        sub_data: list,
+        scenes: list,
+        out: str,
     ) -> str:
-        """
-        يُطبّق الـ PNG overlays في batches من 6 مشاهد لتجنب
-        حد FFmpeg على filter_complex.
-        """
-        BATCH = 6
+        """تطبيق PNG overlays في batches لتجنب FFmpeg limit."""
+        BATCH_SIZE = 6
         current = video
-        t       = 0.0
+        cumulative_time = 0.0
 
-        for batch_start in range(0, len(sub_data), BATCH):
-            batch   = sub_data[batch_start:batch_start + BATCH]
-            batch_t = t
-            tmp_out = str(self.temp_dir / f"sub_batch_{batch_start:03d}.mp4")
+        # الحصول على إعدادات الجودة
+        quality_cfg = self.QUALITY_PRESETS.get(
+            self.quality, self.QUALITY_PRESETS["high"]
+        )
 
+        for batch_idx, batch_start in enumerate(range(0, len(sub_data), BATCH_SIZE)):
+            batch = sub_data[batch_start:batch_start + BATCH_SIZE]
+            batch_time = cumulative_time
+            tmp_out = str(self.temp_dir / f"sub_batch_{batch_idx:03d}.mp4")
+
+            # بناء inputs
             inputs = ["-i", current]
             for png, _ in batch:
                 inputs += ["-i", png]
 
-            fp         = []
+            # بناء filter chain
+            filter_parts = []
             cur_stream = "0:v"
 
             for j, (_, scene) in enumerate(batch):
-                dur   = scene.get("duration", 3.0)
+                dur = scene.get("duration", 3.0)
                 pause = scene.get("pause_after", 0.3)
-                t_end = batch_t + dur
-                nxt   = f"vs{batch_start + j}"
-                fp.append(
+                t_end = batch_time + dur
+
+                next_label = f"vs{batch_start + j}"
+                filter_parts.append(
                     f"[{cur_stream}][{j+1}:v]"
-                    f"overlay=0:0:enable='between(t,{batch_t:.2f},{t_end:.2f})'[{nxt}]"
+                    f"overlay=0:0:enable='between(t,{batch_time:.2f},{t_end:.2f})'"
+                    f"[{next_label}]"
                 )
-                cur_stream = nxt
-                batch_t   += dur + pause
+                cur_stream = next_label
+                batch_time += dur + pause
 
             cmd = (
-                ["ffmpeg", "-y"]
+                ["ffmpeg", "-y", "-loglevel", "error"]
                 + inputs
                 + [
-                    "-filter_complex", ";".join(fp),
+                    "-filter_complex", ";".join(filter_parts),
                     "-map", f"[{cur_stream}]",
-                    "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-                    "-pix_fmt", "yuv420p", "-an",
+                    "-c:v", "libx264",
+                    "-preset", quality_cfg["preset"],
+                    "-crf", str(quality_cfg["crf"]),
+                    "-pix_fmt", "yuv420p",
+                    "-an",
                     tmp_out,
                 ]
             )
-            result = subprocess.run(cmd, capture_output=True)
-            if result.returncode == 0:
-                current = tmp_out
-            else:
-                print(f"  ⚠️ overlay batch {batch_start} فشل — تجاهل هذه الدفعة")
 
-            # تحديث t بعد معالجة الـ batch
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, timeout=180
+                )
+                if result.returncode == 0 and Path(tmp_out).exists():
+                    current = tmp_out
+                else:
+                    err = result.stderr.decode("utf-8", errors="ignore")[:200]
+                    logger.warning(f"⚠ batch {batch_idx} فشل: {err}")
+            except subprocess.TimeoutExpired:
+                logger.warning(f"⚠ batch {batch_idx} timeout")
+            except Exception as e:
+                logger.warning(f"⚠ batch {batch_idx} error: {e}")
+
+            # تحديث الوقت التراكمي
             for _, scene in batch:
-                t += scene.get("duration", 3.0) + scene.get("pause_after", 0.3)
+                cumulative_time += (
+                    scene.get("duration", 3.0) + scene.get("pause_after", 0.3)
+                )
 
+        # نسخ الناتج النهائي
         if current != video:
             shutil.copy(current, out)
         else:
             shutil.copy(video, out)
+
         return out
 
-    # ─── دمج الصوت ──────────────────────────────────────────────────────────
-
+    # ════════════════════════════════════════════════════════════════
+    #                    دمج الصوت
+    # ════════════════════════════════════════════════════════════════
     def _mux(self, video: str, audio: str) -> str:
+        """دمج الصوت مع الفيديو."""
         out = str(self.temp_dir / "muxed.mp4")
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", video, "-i", audio,
-             "-map", "0:v:0", "-map", "1:a:0",
-             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
-             out],
-            check=True, capture_output=True,
+        quality_cfg = self.QUALITY_PRESETS.get(
+            self.quality, self.QUALITY_PRESETS["high"]
         )
+
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-loglevel", "error",
+                    "-i", video,
+                    "-i", audio,
+                    "-map", "0:v:0",
+                    "-map", "1:a:0",
+                    "-c:v", "copy",
+                    "-c:a", "aac",
+                    "-b:a", quality_cfg["audio_bitrate"],
+                    "-shortest",
+                    out,
+                ],
+                check=True,
+                capture_output=True,
+                timeout=120,
+            )
+        except subprocess.CalledProcessError as e:
+            err = e.stderr.decode("utf-8", errors="ignore")[:200]
+            logger.error(f"❌ فشل دمج الصوت: {err}")
+            # محاولة re-encode بالفيديو
+            self._mux_with_reencode(video, audio, out)
+
         return out
 
-    # ─── تدرج الألوان ───────────────────────────────────────────────────────
+    def _mux_with_reencode(self, video: str, audio: str, out: str) -> str:
+        """دمج مع re-encode (fallback عند فشل copy)."""
+        quality_cfg = self.QUALITY_PRESETS.get(
+            self.quality, self.QUALITY_PRESETS["high"]
+        )
 
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-loglevel", "error",
+                    "-i", video,
+                    "-i", audio,
+                    "-map", "0:v:0",
+                    "-map", "1:a:0",
+                    "-c:v", "libx264",
+                    "-preset", quality_cfg["preset"],
+                    "-crf", str(quality_cfg["crf"]),
+                    "-c:a", "aac",
+                    "-b:a", quality_cfg["audio_bitrate"],
+                    "-shortest",
+                    out,
+                ],
+                capture_output=True,
+                timeout=300,
+            )
+        except Exception as e:
+            logger.error(f"❌ فشل re-encode: {e}")
+        return out
+
+    # ════════════════════════════════════════════════════════════════
+    #                    التدرج اللوني
+    # ════════════════════════════════════════════════════════════════
     def _grade(self, inp: str, out: str) -> str:
+        """تطبيق التدرج اللوني السينمائي + letterbox."""
         graded = str(self.temp_dir / "graded.mp4")
-        self.fx.apply_cinematic_grade(inp, graded)
-        self.fx.add_letterbox(graded, out)
+
+        try:
+            self.fx.apply_cinematic_grade(inp, graded)
+        except Exception as e:
+            logger.warning(f"⚠ فشل التدرج اللوني: {e}")
+            shutil.copy(inp, graded)
+
+        try:
+            self.fx.add_letterbox(graded, out)
+        except Exception as e:
+            logger.warning(f"⚠ فشل letterbox: {e}")
+            shutil.copy(graded, out)
+
         return out
+
+    # ════════════════════════════════════════════════════════════════
+    #                    دوال مساعدة
+    # ════════════════════════════════════════════════════════════════
+    def cleanup_temp_files(self) -> None:
+        """تنظيف الملفات المؤقتة."""
+        try:
+            count = 0
+            patterns = [
+                "assem_*.mp4", "sub_batch_*.mp4", "subtitles.srt",
+                "muxed.mp4", "graded.mp4", "subtitled.mp4",
+                "assembled_raw.mp4",
+            ]
+
+            for pattern in patterns:
+                for f in self.temp_dir.glob(pattern):
+                    f.unlink(missing_ok=True)
+                    count += 1
+
+            for f in self.clips_dir.glob("*.mp4"):
+                f.unlink(missing_ok=True)
+                count += 1
+
+            logger.info(f"🧹 تم تنظيف {count} ملف مؤقت")
+        except Exception as e:
+            logger.warning(f"⚠ فشل التنظيف: {e}")
+
+    def get_video_info(self, video_path: str) -> dict:
+        """الحصول على معلومات الفيديو."""
+        try:
+            import json as json_lib
+            result = subprocess.run(
+                [
+                    "ffprobe", "-v", "quiet",
+                    "-print_format", "json",
+                    "-show_format", "-show_streams",
+                    video_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
+            )
+            data = json_lib.loads(result.stdout)
+
+            video_stream = next(
+                (s for s in data.get("streams", []) if s["codec_type"] == "video"),
+                None,
+            )
+
+            return {
+                "duration": float(data.get("format", {}).get("duration", 0)),
+                "width": video_stream.get("width") if video_stream else 0,
+                "height": video_stream.get("height") if video_stream else 0,
+                "fps": eval(video_stream.get("avg_frame_rate", "0/1")) if video_stream else 0,
+                "size_mb": Path(video_path).stat().st_size / (1024 * 1024),
+            }
+        except Exception as e:
+            logger.error(f"❌ فشل قراءة معلومات الفيديو: {e}")
+            return {}
+
+
+# ════════════════════════════════════════════════════════════════════════
+#                    اختبار سريع
+# ════════════════════════════════════════════════════════════════════════
+if __name__ == "__main__":
+    editor = CinematicEditor()
+    print(f"✓ CinematicEditor جاهز")
+    print(f"  Dimensions: {editor.w}x{editor.h}")
+    print(f"  FPS: {editor.fps}")
+    print(f"  Quality: {editor.quality}")
+    print(f"  Pexels: {'✓' if editor.pexels_key else '✗'}")
+    print(f"  Pixabay: {'✓' if editor.pixabay_key else '✗'}")
