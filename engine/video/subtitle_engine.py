@@ -49,30 +49,32 @@ class SubtitleEngine:
     """محرك الترجمة العربية الاحترافية."""
 
     # ─── أولويات الخطوط (متطابق مع download_fonts.py) ─────────────
-    FONT_PATHS = [
-        # الخطوط المحلية (أولوية عالية)
-        "engine/assets/fonts/Cairo-Bold.ttf",
-        "engine/assets/fonts/Cairo-Black.ttf",
-        "engine/assets/fonts/Tajawal-ExtraBold.ttf",
-        "engine/assets/fonts/Tajawal-Bold.ttf",
-        "engine/assets/fonts/Almarai-ExtraBold.ttf",
-        "engine/assets/fonts/Almarai-Bold.ttf",
-        "engine/assets/fonts/Changa-Bold.ttf",
-        "engine/assets/fonts/Amiri-Bold.ttf",
-        "engine/assets/fonts/NotoNaskhArabic-Bold.ttf",
-        # الخطوط القديمة (للتوافق)
-        "engine/assets/fonts/Cairo.ttf",
-        "engine/assets/fonts/Tajawal.ttf",
-        "engine/assets/fonts/Changa.ttf",
-        "engine/assets/fonts/NotoNaskhArabic.ttf",
-        # خطوط النظام (Linux)
-        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf",
-        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    ]
+   FONT_PATHS = [
+    # 🌟 الخطوط الأساسية (Static - تعمل دائماً)
+    "engine/assets/fonts/Tajawal-ExtraBold.ttf",
+    "engine/assets/fonts/Tajawal-Bold.ttf",
+    "engine/assets/fonts/Almarai-ExtraBold.ttf",
+    "engine/assets/fonts/Almarai-Bold.ttf",
+    "engine/assets/fonts/Amiri-Bold.ttf",
+    
+    # 🎨 Variable Fonts (تعمل مع Pillow الحديث)
+    "engine/assets/fonts/Cairo-VF.ttf",
+    "engine/assets/fonts/Changa-VF.ttf",
+    "engine/assets/fonts/NotoNaskhArabic-VF.ttf",
+    
+    # خطوط Regular احتياطية
+    "engine/assets/fonts/Tajawal-Regular.ttf",
+    "engine/assets/fonts/Almarai-Regular.ttf",
+    "engine/assets/fonts/Amiri-Regular.ttf",
+    
+    # خطوط النظام (Linux - من fonts-noto-core)
+    "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf",
+    "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+]
 
     # ─── أحجام الخطوط الافتراضية ─────────────────────────────────
     DEFAULT_SIZES = {
