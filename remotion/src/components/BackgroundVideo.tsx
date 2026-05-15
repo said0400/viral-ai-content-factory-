@@ -2,6 +2,7 @@
  * 🎬 Background Video Component
  * ═══════════════════════════════════════════════════════════════
  * عرض فيديو الخلفية مع تأثيرات احترافية
+ * يستخدم staticFile() لتحميل الفيديوهات من public/
  * ═══════════════════════════════════════════════════════════════
  */
 
@@ -13,6 +14,7 @@ import {
   useVideoConfig,
   interpolate,
   Loop,
+  staticFile,
 } from "remotion";
 import { BackgroundVideoProps, ZoomType } from "../types";
 
@@ -44,6 +46,13 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
     return <FallbackBackground width={width} height={height} />;
   }
 
+  // 🆕 استخدام staticFile() لتحويل المسار النسبي إلى URL صحيح
+  // إذا كان المسار يبدأ بـ http أو file، استخدمه كما هو
+  // وإلا، استخدم staticFile()
+  const videoSrc = src.startsWith("http") || src.startsWith("file://")
+    ? src
+    : staticFile(src);
+
   return (
     <AbsoluteFill
       style={{
@@ -62,7 +71,7 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
       >
         <Loop durationInFrames={durationInFrames}>
           <OffthreadVideo
-            src={src}
+            src={videoSrc}
             muted
             volume={0}
             style={{
