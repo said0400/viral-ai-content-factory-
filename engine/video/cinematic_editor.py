@@ -1,20 +1,20 @@
 """
-🎬 Cinematic Editor — التحرير السينمائي للفيديو
+🎬 Cinematic Editor — مُجهّز البيانات لـ Remotion
 ═══════════════════════════════════════════════════════════════
-محرك التحرير الرئيسي يجمع:
-  • جلب الفيديوهات (Pexels + Pixabay)
-  • معالجة الـ clips (scale, crop, zoom, shake)
-  • تطبيق Transitions
-  • إضافة الترجمة (SRT + PNG overlays)
-  • دمج الصوت والتدرج اللوني
+بعد التحول لـ Remotion، أصبح هذا الملف مسؤولاً عن:
+  • جلب الفيديوهات من Pexels + Pixabay
+  • اختيار الكلمات المفتاحية الذكية (50+ keyword + visual_prompt)
+  • بناء JSON props كامل لـ Remotion
+  • تجهيز التايملاين (Timeline) للمشاهد
 
-الإصلاحات:
-  ✓ Pexels + Pixabay (بدلاً من Pexels فقط)
-  ✓ مسح cache قبل كل تشغيل (تنويع الفيديوهات)
-  ✓ 50+ كلمة بحث + visual_prompt من AI
-  ✓ SRT + batched overlay (يحل مشكلة FFmpeg limit)
-  ✓ Loop قبل Trim (يمنع المشاهد القصيرة)
-  ✓ دعم quality من main.py
+التغييرات الكبيرة:
+  ❌ حُذف: معالجة الـ clips بـ FFmpeg (zoom, shake, transitions)
+  ❌ حُذف: PNG overlays للترجمة
+  ❌ حُذف: التدرج اللوني والـ letterbox
+  ❌ حُذف: دمج الصوت
+  ✅ أُضيف: تجهيز JSON لـ Remotion
+  ✅ احتُفظ: جلب الفيديوهات (Pexels + Pixabay)
+  ✅ احتُفظ: ARABIC_HINTS الذكية
 
 ضع في: engine/video/cinematic_editor.py
 ═══════════════════════════════════════════════════════════════
@@ -28,17 +28,13 @@ import logging
 import subprocess
 import requests
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
-
-from engine.video.effects_engine    import EffectsEngine
-from engine.video.transition_engine import TransitionEngine
-from engine.video.subtitle_engine   import SubtitleEngine
+from typing import Optional, List, Dict
 
 logger = logging.getLogger(__name__)
 
 
 class CinematicEditor:
-    """محرك التحرير السينمائي الرئيسي."""
+    """مُجهّز البيانات والمشاهد لـ Remotion."""
 
     # ════════════════════════════════════════════════════════════════
     #                    قواميس البحث
@@ -128,6 +124,7 @@ class CinematicEditor:
         "صمت":    ["fog dark forest", "empty road night"],
     }
 
+    # ─── خرائط للتأثيرات (تُمرّر لـ Remotion كـ JSON) ────────────
     ZOOM_MAP = {
         "hook":       "punch_zoom",
         "build":      "slow_zoom_in",
@@ -146,16 +143,9 @@ class CinematicEditor:
         "main":       ["cross_dissolve", "smooth_fade"],
     }
 
-    # ─── إعدادات الجودة ───────────────────────────────────────────
-    QUALITY_PRESETS = {
-        "medium": {"crf": 23, "preset": "fast",      "audio_bitrate": "128k"},
-        "high":   {"crf": 19, "preset": "medium",    "audio_bitrate": "192k"},
-        "ultra":  {"crf": 17, "preset": "slow",      "audio_bitrate": "256k"},
-    }
-
     # ════════════════════════════════════════════════════════════════
     def __init__(self):
-        """تهيئة محرك التحرير."""
+        """تهيئة مُجهّز البيانات."""
         self.w = int(os.getenv("VIDEO_WIDTH",  "1080"))
         self.h = int(os.getenv("VIDEO_HEIGHT", "1920"))
         self.fps = int(os.getenv("VIDEO_FPS",  "30"))
@@ -168,21 +158,13 @@ class CinematicEditor:
         # المسارات
         self.temp_dir = Path(os.getenv("TEMP_DIR", "./temp"))
         self.footage_dir = self.temp_dir / "footage"
-        self.clips_dir = self.temp_dir / "clips"
-        for d in [self.temp_dir, self.footage_dir, self.clips_dir]:
-            d.mkdir(parents=True, exist_ok=True)
-
-        # المحركات الفرعية
-        self.fx = EffectsEngine(self.w, self.h)
-        self.trans = TransitionEngine(self.w, self.h)
-        self.subs = SubtitleEngine(self.w, self.h)
+        self.footage_dir.mkdir(parents=True, exist_ok=True)
 
         # مسح footage القديم
         self._clear_old_footage()
 
         logger.info(
-            f"🎬 CinematicEditor | {self.w}x{self.h}@{self.fps}fps | "
-            f"Quality: {self.quality}"
+            f"🎬 CinematicEditor (Remotion mode) | {self.w}x{self.h}@{self.fps}fps"
         )
 
     def _clear_old_footage(self) -> None:
@@ -202,7 +184,203 @@ class CinematicEditor:
             logger.warning(f"⚠ فشل المسح: {e}")
 
     # ════════════════════════════════════════════════════════════════
-    #                    الدالة الرئيسية
+    #                    🆕 الدالة الرئيسية الجديدة
+    # ════════════════════════════════════════════════════════════════
+    def build_props_for_remotion(
+        self,
+        script: dict,
+        audio_path: str,
+        subtitle_data: list,
+    ) -> dict:
+        """
+        🆕 بناء JSON props كامل لـ Remotion.
+
+        هذه هي الدالة الرئيسية الجديدة بدلاً من build_video().
+
+        Args:
+            script: سكربت AI {scenes, duration_estimate, ...}
+            audio_path: مسار ملف الصوت
+            subtitle_data: قائمة الترجمات [(png_path, scene), ...]
+                          أو [{text, start, end}, ...]
+
+        Returns:
+            dict يحتوي كل ما يحتاجه Remotion:
+            {
+                "title": "...",
+                "audioPath": "...",
+                "totalDuration": 45.0,
+                "fps": 30,
+                "width": 1080,
+                "height": 1920,
+                "scenes": [
+                    {
+                        "id": 0,
+                        "type": "hook",
+                        "text": "...",
+                        "duration": 3.5,
+                        "pauseAfter": 0.3,
+                        "startTime": 0.0,
+                        "endTime": 3.5,
+                        "backgroundPath": "/abs/path/footage_000.mp4",
+                        "zoomEffect": "punch_zoom",
+                        "transitionIn": "flash_black",
+                        "shake": true
+                    },
+                    ...
+                ],
+                "subtitles": [
+                    {"text": "...", "start": 0.0, "end": 3.5},
+                    ...
+                ]
+            }
+        """
+        scenes = script.get("scenes", [])
+        total_dur = float(script.get("duration_estimate", 45.0))
+
+        if not scenes:
+            raise ValueError("❌ لا توجد مشاهد في السكربت")
+
+        logger.info(f"🎬 تجهيز Remotion props | {len(scenes)} مشهد | {total_dur:.1f}s")
+
+        # 1️⃣ جلب الفيديوهات
+        logger.info("► جلب الفيديوهات...")
+        raws = self._fetch_footage(scenes)
+
+        # 2️⃣ بناء بيانات المشاهد
+        logger.info("► بناء بيانات المشاهد...")
+        scenes_data = self._build_scenes_data(scenes, raws)
+
+        # 3️⃣ بناء بيانات الترجمات
+        logger.info("► بناء بيانات الترجمات...")
+        subtitles_data = self._build_subtitles_data(subtitle_data, scenes)
+
+        # 4️⃣ تجهيز الـ props النهائية
+        props = {
+            # المعلومات العامة
+            "title": script.get("title", ""),
+            "totalDuration": total_dur,
+            "fps": self.fps,
+            "width": self.w,
+            "height": self.h,
+            "quality": self.quality,
+
+            # الملفات
+            "audioPath": str(Path(audio_path).resolve()) if audio_path else "",
+
+            # المحتوى
+            "scenes": scenes_data,
+            "subtitles": subtitles_data,
+
+            # إعدادات التصميم (Remotion سيستخدمها)
+            "design": {
+                "fontFamily": "Cairo",
+                "fontWeight": 900,
+                "primaryColor": "#FFFFFF",
+                "accentColor": "#FFD700",
+                "shadowColor": "rgba(0,0,0,0.9)",
+                "backgroundOverlay": "rgba(0,0,0,0.35)",
+                "letterboxEnabled": True,
+                "cinematicGrade": True,
+            },
+        }
+
+        logger.info(f"✓ Remotion props جاهز | {len(scenes_data)} مشهد | {len(subtitles_data)} ترجمة")
+        return props
+
+    def _build_scenes_data(self, scenes: list, raws: list) -> List[dict]:
+        """بناء بيانات المشاهد كـ JSON."""
+        scenes_data = []
+        cumulative_time = 0.0
+
+        for i, scene in enumerate(scenes):
+            scene_type = scene.get("type", "main")
+            duration = float(scene.get("duration", 3.0))
+            pause_after = float(scene.get("pause_after", 0.3))
+
+            # التأثيرات
+            zoom_effect = self.ZOOM_MAP.get(scene_type, "slow_zoom_in")
+            available_trans = self.SCENE_TRANSITIONS.get(
+                scene_type, ["cross_dissolve"]
+            )
+            transition = random.choice(available_trans) if i > 0 else "none"
+
+            # Shake للمشاهد المهمة
+            shake = scene_type in ("hook", "peak")
+
+            # المسار المطلق للفيديو
+            background_path = ""
+            if i < len(raws) and raws[i]:
+                background_path = str(Path(raws[i]).resolve())
+
+            scene_data = {
+                "id": i,
+                "type": scene_type,
+                "text": scene.get("text", ""),
+                "duration": duration,
+                "pauseAfter": pause_after,
+                "startTime": round(cumulative_time, 3),
+                "endTime": round(cumulative_time + duration, 3),
+                "totalLength": round(duration + pause_after, 3),
+                "backgroundPath": background_path,
+                "zoomEffect": zoom_effect,
+                "transitionIn": transition,
+                "shake": shake,
+                "visualPrompt": scene.get("visual_prompt", ""),
+            }
+
+            scenes_data.append(scene_data)
+            cumulative_time += duration + pause_after
+
+        return scenes_data
+
+    def _build_subtitles_data(
+        self,
+        sub_data: list,
+        scenes: list,
+    ) -> List[dict]:
+        """
+        بناء بيانات الترجمات كـ JSON لـ Remotion.
+
+        يدعم نوعين من المدخلات:
+        1. القديم: [(png_path, scene_dict), ...]
+        2. الجديد: [{"text": "...", "start": 0.0, "end": 3.0}, ...]
+        """
+        if not sub_data:
+            logger.warning("⚠ لا توجد بيانات ترجمة")
+            return []
+
+        subtitles = []
+        cumulative_time = 0.0
+
+        for i, item in enumerate(sub_data):
+            # التعامل مع التنسيق القديم (tuple)
+            if isinstance(item, tuple) and len(item) >= 2:
+                _, scene = item[0], item[1]
+                text = scene.get("text", "")
+                duration = float(scene.get("duration", 3.0))
+                pause = float(scene.get("pause_after", 0.3))
+
+                subtitles.append({
+                    "id": i,
+                    "text": text,
+                    "start": round(cumulative_time, 3),
+                    "end": round(cumulative_time + duration, 3),
+                })
+                cumulative_time += duration + pause
+
+            # التعامل مع التنسيق الجديد (dict)
+            elif isinstance(item, dict):
+                subtitles.append({
+                    "id": i,
+                    "text": item.get("text", ""),
+                    "start": round(float(item.get("start", 0)), 3),
+                    "end": round(float(item.get("end", 0)), 3),
+                })
+
+        return subtitles
+
+    # ════════════════════════════════════════════════════════════════
+    #                    🔁 الدالة القديمة (Deprecated)
     # ════════════════════════════════════════════════════════════════
     def build_video(
         self,
@@ -211,44 +389,24 @@ class CinematicEditor:
         subtitle_data: list,
         output_path: str,
     ) -> str:
-        """بناء الفيديو الكامل من السكربت."""
-        scenes = script.get("scenes", [])
-        total_dur = float(script.get("duration_estimate", 45.0))
+        """
+        ⚠️ DEPRECATED: استخدم build_props_for_remotion() بدلاً منها.
 
-        if not scenes:
-            raise ValueError("❌ لا توجد مشاهد في السكربت")
-
-        logger.info(f"🎬 بناء فيديو | {len(scenes)} مشهد | {total_dur:.1f}s")
-
-        # 1️⃣ جلب الفيديوهات
-        logger.info("► جلب الفيديوهات...")
-        raws = self._fetch_footage(scenes)
-
-        # 2️⃣ معالجة الـ clips
-        logger.info("► معالجة الـ clips...")
-        processed = self._process_clips(raws, scenes)
-
-        # 3️⃣ تجميع مع transitions
-        logger.info("► تجميع مع transitions...")
-        assembled = self._assemble(processed, scenes, total_dur)
-
-        # 4️⃣ إضافة الترجمة
-        logger.info("► إضافة الترجمة...")
-        subtitled = self._overlay_subs(assembled, subtitle_data, scenes)
-
-        # 5️⃣ دمج الصوت
-        logger.info("► دمج الصوت...")
-        muxed = self._mux(subtitled, audio_path)
-
-        # 6️⃣ التدرج اللوني النهائي
-        logger.info("► تدرج الألوان...")
-        self._grade(muxed, output_path)
-
-        logger.info(f"✓ اكتمل الفيديو: {Path(output_path).name}")
-        return output_path
+        هذه الدالة لم تعد تعمل لأن المشروع تحوّل لـ Remotion.
+        """
+        raise DeprecationWarning(
+            "❌ build_video() لم تعد مدعومة!\n"
+            "   استخدم: build_props_for_remotion() ثم RemotionRenderer.render_final()\n"
+            "\n"
+            "   مثال:\n"
+            "   editor = CinematicEditor()\n"
+            "   props = editor.build_props_for_remotion(script, audio, subs)\n"
+            "   renderer = RemotionRenderer()\n"
+            "   renderer.render_final(props, output_path)"
+        )
 
     # ════════════════════════════════════════════════════════════════
-    #                    جلب الفيديوهات
+    #                    جلب الفيديوهات (احتُفظ به)
     # ════════════════════════════════════════════════════════════════
     def _fetch_footage(self, scenes: list) -> list:
         """جلب فيديوهات لكل مشهد."""
@@ -338,7 +496,6 @@ class CinematicEditor:
             videos = r.json().get("videos", [])
 
             if not videos:
-                # محاولة بدون page
                 r2 = requests.get(
                     "https://api.pexels.com/videos/search",
                     headers={"Authorization": self.pexels_key},
@@ -364,7 +521,6 @@ class CinematicEditor:
             ]
             pool = portrait_videos if portrait_videos else videos
 
-            # محاولة العثور على فيديو غير مستخدم
             target = None
             for _ in range(5):
                 video = random.choice(pool)
@@ -410,12 +566,10 @@ class CinematicEditor:
             if not hits:
                 return None
 
-            # محاولة العثور على فيديو غير مستخدم
             for _ in range(5):
                 video = random.choice(hits)
                 videos = video.get("videos", {})
 
-                # اختر أفضل جودة
                 for size in ("large", "medium", "small"):
                     if size in videos and videos[size].get("url"):
                         url = videos[size]["url"]
@@ -469,7 +623,7 @@ class CinematicEditor:
         return files[0] if files else None
 
     def _placeholder(self, idx: int) -> str:
-        """توليد فيديو خلفية بسيط (placeholder)."""
+        """توليد فيديو خلفية بسيط (placeholder) باستخدام FFmpeg."""
         out = str(self.footage_dir / f"ph_{idx:03d}.mp4")
         colors = ["0x0a0a1a", "0x0d0d1e", "0x080818", "0x0a0a0a", "0x05050f"]
         c = colors[idx % len(colors)]
@@ -486,7 +640,6 @@ class CinematicEditor:
                 check=True,
             )
         except Exception:
-            # fallback أسود
             subprocess.run(
                 ["ffmpeg", "-y", "-f", "lavfi",
                  "-i", f"color=c=black:s={self.w}x{self.h}:r={self.fps}",
@@ -497,312 +650,6 @@ class CinematicEditor:
                 timeout=30,
             )
         return out
-          # ════════════════════════════════════════════════════════════════
-    #                    معالجة الـ Clips
-    # ════════════════════════════════════════════════════════════════
-    def _process_clips(self, raws: list, scenes: list) -> list:
-        """معالجة كل clip: scale, loop, trim, zoom, shake."""
-        processed = []
-
-        for i, (raw, scene) in enumerate(zip(raws, scenes)):
-            st = scene.get("type", "main")
-            dur = scene.get("duration", 3.0) + scene.get("pause_after", 0.3)
-            zoom = self.ZOOM_MAP.get(st, "slow_zoom_in")
-
-            # مسارات الملفات الوسيطة
-            sc = str(self.clips_dir / f"sc_{i:03d}.mp4")  # scaled
-            lp = str(self.clips_dir / f"lp_{i:03d}.mp4")  # looped
-            tr = str(self.clips_dir / f"tr_{i:03d}.mp4")  # trimmed
-            zm = str(self.clips_dir / f"zm_{i:03d}.mp4")  # zoomed
-
-            try:
-                # 1. تحجيم وقص للأبعاد المطلوبة (1080x1920)
-                self.fx.scale_and_crop(raw, sc)
-
-                # 2. Loop قبل Trim (يضمن مدة كافية)
-                self.fx.loop_clip_to_duration(sc, lp, dur + 1.0)
-
-                # 3. Trim للمدة المطلوبة
-                self.fx.trim_clip(lp, tr, 0.0, dur)
-
-                # 4. تطبيق Zoom Effect
-                self.fx.apply_zoom_effect(tr, zm, zoom, dur)
-
-                # 5. Shake للمشاهد المهمة (hook, peak)
-                if st in ("hook", "peak"):
-                    sh = str(self.clips_dir / f"sh_{i:03d}.mp4")
-                    self.fx.apply_smooth_shake(zm, sh, 2.0)
-                    processed.append(sh)
-                else:
-                    processed.append(zm)
-
-            except Exception as e:
-                logger.warning(f"⚠ خطأ في معالجة clip {i}: {e}")
-                # استخدم الـ raw كـ fallback
-                processed.append(raw)
-
-        return processed
-
-    # ════════════════════════════════════════════════════════════════
-    #                    تجميع الـ Clips مع Transitions
-    # ════════════════════════════════════════════════════════════════
-    def _assemble(self, clips: list, scenes: list, total_dur: float) -> str:
-        """تجميع الـ clips مع تطبيق الانتقالات."""
-        out = str(self.temp_dir / "assembled_raw.mp4")
-
-        if not clips:
-            raise ValueError("❌ لا توجد clips للتجميع")
-
-        if len(clips) == 1:
-            shutil.copy(clips[0], out)
-            return out
-
-        current = clips[0]
-        for i in range(1, len(clips)):
-            scene_type = scenes[i].get("type", "main") if i < len(scenes) else "main"
-
-            # اختيار transition عشوائي من الأنواع المناسبة
-            available_trans = self.SCENE_TRANSITIONS.get(
-                scene_type,
-                ["cross_dissolve"]
-            )
-            transition = random.choice(available_trans)
-
-            nxt = str(self.temp_dir / f"assem_{i:03d}.mp4")
-
-            try:
-                self.trans.apply_transition(
-                    current, clips[i], nxt, transition, 0.18
-                )
-                current = nxt
-            except Exception as e:
-                logger.warning(f"⚠ فشل transition {i}: {e}")
-                # في حالة الفشل، استخدم الـ clip التالي مباشرة
-                current = clips[i]
-
-        shutil.copy(current, out)
-        return out
-
-    # ════════════════════════════════════════════════════════════════
-    #                    إضافة الترجمة
-    # ════════════════════════════════════════════════════════════════
-    def _overlay_subs(self, video: str, sub_data: list, scenes: list) -> str:
-        """إضافة الترجمة على الفيديو (PNG overlays)."""
-        out = str(self.temp_dir / "subtitled.mp4")
-
-        if not sub_data:
-            logger.warning("⚠ لا توجد بيانات ترجمة")
-            shutil.copy(video, out)
-            return out
-
-        # حفظ SRT للاستخدام المستقبلي (اختياري)
-        srt_path = str(self.temp_dir / "subtitles.srt")
-        try:
-            self._write_srt(srt_path, sub_data, scenes)
-        except Exception as e:
-            logger.debug(f"تجاهل خطأ SRT: {e}")
-
-        # تطبيق PNG overlays في batches
-        return self._overlay_png_batched(video, sub_data, scenes, out)
-
-    def _write_srt(self, srt_path: str, sub_data: list, scenes: list) -> None:
-        """كتابة ملف SRT للترجمة."""
-        def fmt_time(s: float) -> str:
-            h = int(s // 3600)
-            m = int((s % 3600) // 60)
-            ss = int(s % 60)
-            ms = int((s % 1) * 1000)
-            return f"{h:02}:{m:02}:{ss:02},{ms:03}"
-
-        lines = []
-        t = 0.0
-
-        for i, (_, scene) in enumerate(sub_data):
-            dur = scene.get("duration", 3.0)
-            pause = scene.get("pause_after", 0.3)
-
-            lines.append(str(i + 1))
-            lines.append(f"{fmt_time(t)} --> {fmt_time(t + dur)}")
-            lines.append(scene.get("text", ""))
-            lines.append("")
-            t += dur + pause
-
-        with open(srt_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
-
-    def _overlay_png_batched(
-        self,
-        video: str,
-        sub_data: list,
-        scenes: list,
-        out: str,
-    ) -> str:
-        """تطبيق PNG overlays في batches لتجنب FFmpeg limit."""
-        BATCH_SIZE = 6
-        current = video
-        cumulative_time = 0.0
-
-        # الحصول على إعدادات الجودة
-        quality_cfg = self.QUALITY_PRESETS.get(
-            self.quality, self.QUALITY_PRESETS["high"]
-        )
-
-        for batch_idx, batch_start in enumerate(range(0, len(sub_data), BATCH_SIZE)):
-            batch = sub_data[batch_start:batch_start + BATCH_SIZE]
-            batch_time = cumulative_time
-            tmp_out = str(self.temp_dir / f"sub_batch_{batch_idx:03d}.mp4")
-
-            # بناء inputs
-            inputs = ["-i", current]
-            for png, _ in batch:
-                inputs += ["-i", png]
-
-            # بناء filter chain
-            filter_parts = []
-            cur_stream = "0:v"
-
-            for j, (_, scene) in enumerate(batch):
-                dur = scene.get("duration", 3.0)
-                pause = scene.get("pause_after", 0.3)
-                t_end = batch_time + dur
-
-                next_label = f"vs{batch_start + j}"
-                filter_parts.append(
-                    f"[{cur_stream}][{j+1}:v]"
-                    f"overlay=0:0:enable='between(t,{batch_time:.2f},{t_end:.2f})'"
-                    f"[{next_label}]"
-                )
-                cur_stream = next_label
-                batch_time += dur + pause
-
-            cmd = (
-                ["ffmpeg", "-y", "-loglevel", "error"]
-                + inputs
-                + [
-                    "-filter_complex", ";".join(filter_parts),
-                    "-map", f"[{cur_stream}]",
-                    "-c:v", "libx264",
-                    "-preset", quality_cfg["preset"],
-                    "-crf", str(quality_cfg["crf"]),
-                    "-pix_fmt", "yuv420p",
-                    "-an",
-                    tmp_out,
-                ]
-            )
-
-            try:
-                result = subprocess.run(
-                    cmd, capture_output=True, timeout=180
-                )
-                if result.returncode == 0 and Path(tmp_out).exists():
-                    current = tmp_out
-                else:
-                    err = result.stderr.decode("utf-8", errors="ignore")[:200]
-                    logger.warning(f"⚠ batch {batch_idx} فشل: {err}")
-            except subprocess.TimeoutExpired:
-                logger.warning(f"⚠ batch {batch_idx} timeout")
-            except Exception as e:
-                logger.warning(f"⚠ batch {batch_idx} error: {e}")
-
-            # تحديث الوقت التراكمي
-            for _, scene in batch:
-                cumulative_time += (
-                    scene.get("duration", 3.0) + scene.get("pause_after", 0.3)
-                )
-
-        # نسخ الناتج النهائي
-        if current != video:
-            shutil.copy(current, out)
-        else:
-            shutil.copy(video, out)
-
-        return out
-
-    # ════════════════════════════════════════════════════════════════
-    #                    دمج الصوت
-    # ════════════════════════════════════════════════════════════════
-    def _mux(self, video: str, audio: str) -> str:
-        """دمج الصوت مع الفيديو."""
-        out = str(self.temp_dir / "muxed.mp4")
-        quality_cfg = self.QUALITY_PRESETS.get(
-            self.quality, self.QUALITY_PRESETS["high"]
-        )
-
-        try:
-            subprocess.run(
-                [
-                    "ffmpeg", "-y", "-loglevel", "error",
-                    "-i", video,
-                    "-i", audio,
-                    "-map", "0:v:0",
-                    "-map", "1:a:0",
-                    "-c:v", "copy",
-                    "-c:a", "aac",
-                    "-b:a", quality_cfg["audio_bitrate"],
-                    "-shortest",
-                    out,
-                ],
-                check=True,
-                capture_output=True,
-                timeout=120,
-            )
-        except subprocess.CalledProcessError as e:
-            err = e.stderr.decode("utf-8", errors="ignore")[:200]
-            logger.error(f"❌ فشل دمج الصوت: {err}")
-            # محاولة re-encode بالفيديو
-            self._mux_with_reencode(video, audio, out)
-
-        return out
-
-    def _mux_with_reencode(self, video: str, audio: str, out: str) -> str:
-        """دمج مع re-encode (fallback عند فشل copy)."""
-        quality_cfg = self.QUALITY_PRESETS.get(
-            self.quality, self.QUALITY_PRESETS["high"]
-        )
-
-        try:
-            subprocess.run(
-                [
-                    "ffmpeg", "-y", "-loglevel", "error",
-                    "-i", video,
-                    "-i", audio,
-                    "-map", "0:v:0",
-                    "-map", "1:a:0",
-                    "-c:v", "libx264",
-                    "-preset", quality_cfg["preset"],
-                    "-crf", str(quality_cfg["crf"]),
-                    "-c:a", "aac",
-                    "-b:a", quality_cfg["audio_bitrate"],
-                    "-shortest",
-                    out,
-                ],
-                capture_output=True,
-                timeout=300,
-            )
-        except Exception as e:
-            logger.error(f"❌ فشل re-encode: {e}")
-        return out
-
-    # ════════════════════════════════════════════════════════════════
-    #                    التدرج اللوني
-    # ════════════════════════════════════════════════════════════════
-    def _grade(self, inp: str, out: str) -> str:
-        """تطبيق التدرج اللوني السينمائي + letterbox."""
-        graded = str(self.temp_dir / "graded.mp4")
-
-        try:
-            self.fx.apply_cinematic_grade(inp, graded)
-        except Exception as e:
-            logger.warning(f"⚠ فشل التدرج اللوني: {e}")
-            shutil.copy(inp, graded)
-
-        try:
-            self.fx.add_letterbox(graded, out)
-        except Exception as e:
-            logger.warning(f"⚠ فشل letterbox: {e}")
-            shutil.copy(graded, out)
-
-        return out
 
     # ════════════════════════════════════════════════════════════════
     #                    دوال مساعدة
@@ -812,57 +659,19 @@ class CinematicEditor:
         try:
             count = 0
             patterns = [
-                "assem_*.mp4", "sub_batch_*.mp4", "subtitles.srt",
-                "muxed.mp4", "graded.mp4", "subtitled.mp4",
-                "assembled_raw.mp4",
+                "remotion_props.json",
+                "footage_*.mp4",
+                "ph_*.mp4",
             ]
 
             for pattern in patterns:
-                for f in self.temp_dir.glob(pattern):
+                for f in self.temp_dir.rglob(pattern):
                     f.unlink(missing_ok=True)
                     count += 1
-
-            for f in self.clips_dir.glob("*.mp4"):
-                f.unlink(missing_ok=True)
-                count += 1
 
             logger.info(f"🧹 تم تنظيف {count} ملف مؤقت")
         except Exception as e:
             logger.warning(f"⚠ فشل التنظيف: {e}")
-
-    def get_video_info(self, video_path: str) -> dict:
-        """الحصول على معلومات الفيديو."""
-        try:
-            import json as json_lib
-            result = subprocess.run(
-                [
-                    "ffprobe", "-v", "quiet",
-                    "-print_format", "json",
-                    "-show_format", "-show_streams",
-                    video_path,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=True,
-            )
-            data = json_lib.loads(result.stdout)
-
-            video_stream = next(
-                (s for s in data.get("streams", []) if s["codec_type"] == "video"),
-                None,
-            )
-
-            return {
-                "duration": float(data.get("format", {}).get("duration", 0)),
-                "width": video_stream.get("width") if video_stream else 0,
-                "height": video_stream.get("height") if video_stream else 0,
-                "fps": eval(video_stream.get("avg_frame_rate", "0/1")) if video_stream else 0,
-                "size_mb": Path(video_path).stat().st_size / (1024 * 1024),
-            }
-        except Exception as e:
-            logger.error(f"❌ فشل قراءة معلومات الفيديو: {e}")
-            return {}
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -870,9 +679,34 @@ class CinematicEditor:
 # ════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     editor = CinematicEditor()
-    print(f"✓ CinematicEditor جاهز")
+    print(f"✓ CinematicEditor (Remotion mode) جاهز")
     print(f"  Dimensions: {editor.w}x{editor.h}")
     print(f"  FPS: {editor.fps}")
     print(f"  Quality: {editor.quality}")
     print(f"  Pexels: {'✓' if editor.pexels_key else '✗'}")
     print(f"  Pixabay: {'✓' if editor.pixabay_key else '✗'}")
+    
+    # اختبار build_props_for_remotion
+    test_script = {
+        "title": "اختبار",
+        "duration_estimate": 10.0,
+        "scenes": [
+            {
+                "type": "hook",
+                "text": "السلام عليكم",
+                "duration": 3.0,
+                "pause_after": 0.3,
+            },
+            {
+                "type": "main",
+                "text": "هذا اختبار لـ Remotion",
+                "duration": 3.0,
+                "pause_after": 0.3,
+            },
+        ],
+    }
+    
+    print("\n📝 اختبار بناء props...")
+    # ملاحظة: لن يجلب الفيديوهات في الاختبار
+    # props = editor.build_props_for_remotion(test_script, "", [])
+    # print(json.dumps(props, indent=2, ensure_ascii=False))
