@@ -1,41 +1,194 @@
 """
-🎨 Effects Engine — التأثيرات البصرية السينمائية
+🎨 Effects Engine — مولّد إعدادات التأثيرات لـ Remotion
 ═══════════════════════════════════════════════════════════════
-محرك تأثيرات احترافي يوفر:
-  ✓ Scale & Crop للأبعاد العمودية (1080x1920)
-  ✓ Zoom حقيقي تدريجي (zoompan) - ليس scale ثابت!
-  ✓ Camera Shake طبيعي بدوال مثلثية
-  ✓ Loop ذكي للفيديوهات القصيرة
-  ✓ Cinematic Color Grading
-  ✓ Letterbox سينمائي
-  ✓ Glitch / Flash / Vignette إضافية
+بعد التحول لـ Remotion، أصبح هذا الملف مسؤولاً عن:
+  ✓ توليد إعدادات الـ Zoom (يُنفّذها Remotion بـ interpolate)
+  ✓ توليد إعدادات الـ Shake (يُنفّذها Remotion بـ Math.sin)
+  ✓ توليد إعدادات الـ Color Grade (CSS filters)
+  ✓ توليد إعدادات الـ Letterbox
+  ✓ توليد إعدادات الـ Fade/Flash/Glitch
+
+التغييرات الكبيرة:
+  ❌ حُذف: كل FFmpeg subprocess calls
+  ❌ حُذف: تطبيق التأثيرات (Remotion يقوم بها)
+  ✅ احتُفظ: أسماء التأثيرات وإعداداتها
+  ✅ أُضيف: دوال get_*_config() لتمرير الإعدادات لـ Remotion
+
+ملاحظة:
+  • التأثيرات لم تعد تُطبّق هنا، بل في Remotion components
+  • هذا الملف الآن "مرجع تكوين" بدلاً من "محرك تنفيذ"
 
 ضع في: engine/video/effects_engine.py
 ═══════════════════════════════════════════════════════════════
 """
 
 import os
-import shutil
 import logging
-import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, List
 
 logger = logging.getLogger(__name__)
 
 
 class EffectsEngine:
-    """محرك التأثيرات البصرية السينمائية."""
+    """مولّد إعدادات التأثيرات البصرية لـ Remotion."""
 
-    # ─── إعدادات الجودة ───────────────────────────────────────────
-    QUALITY_PRESETS = {
-        "medium": {"crf": 23, "preset": "fast"},
-        "high":   {"crf": 19, "preset": "fast"},   # fast لـ GitHub Actions
-        "ultra":  {"crf": 17, "preset": "medium"},
+    # ════════════════════════════════════════════════════════════════
+    #                    إعدادات الـ Zoom
+    # ════════════════════════════════════════════════════════════════
+    ZOOM_CONFIGS = {
+        "slow_zoom_in": {
+            "type": "scale",
+            "from": 1.0,
+            "to": 1.12,
+            "easing": "ease-out",
+            "originX": "50%",
+            "originY": "50%",
+        },
+        "slow_zoom_out": {
+            "type": "scale",
+            "from": 1.12,
+            "to": 1.0,
+            "easing": "ease-out",
+            "originX": "50%",
+            "originY": "50%",
+        },
+        "punch_zoom": {
+            "type": "scale",
+            "from": 1.0,
+            "to": 1.15,
+            "easing": "ease-in-out",
+            "originX": "50%",
+            "originY": "50%",
+            "fast": True,  # خلال 0.5 ثانية فقط
+        },
+        "drift_right": {
+            "type": "translate",
+            "scale": 1.06,
+            "fromX": 0,
+            "toX": -50,  # بكسل
+            "easing": "linear",
+        },
+        "drift_left": {
+            "type": "translate",
+            "scale": 1.06,
+            "fromX": -50,
+            "toX": 0,
+            "easing": "linear",
+        },
+        "drift_up": {
+            "type": "translate",
+            "scale": 1.06,
+            "fromY": 0,
+            "toY": -50,
+            "easing": "linear",
+        },
+        "drift_down": {
+            "type": "translate",
+            "scale": 1.06,
+            "fromY": -50,
+            "toY": 0,
+            "easing": "linear",
+        },
+        "static": {
+            "type": "none",
+            "scale": 1.0,
+        },
     }
 
-    # ─── Timeout افتراضي ──────────────────────────────────────────
-    DEFAULT_TIMEOUT = 180  # 3 دقائق
+    # ════════════════════════════════════════════════════════════════
+    #                    إعدادات الـ Shake
+    # ════════════════════════════════════════════════════════════════
+    SHAKE_PRESETS = {
+        "subtle": {
+            "intensity": 1.0,
+            "frequencyX": 0.7,
+            "frequencyY": 1.1,
+            "enabled": True,
+        },
+        "normal": {
+            "intensity": 2.0,
+            "frequencyX": 0.7,
+            "frequencyY": 1.1,
+            "enabled": True,
+        },
+        "intense": {
+            "intensity": 4.0,
+            "frequencyX": 0.9,
+            "frequencyY": 1.3,
+            "enabled": True,
+        },
+        "off": {
+            "enabled": False,
+        },
+    }
+
+    # ════════════════════════════════════════════════════════════════
+    #                    إعدادات الـ Color Grade
+    # ════════════════════════════════════════════════════════════════
+    GRADE_CONFIGS = {
+        "cinematic_warm": {
+            "filter": "contrast(1.15) saturate(1.12) brightness(0.95)",
+            "tint": {"r": 1.05, "g": 1.0, "b": 0.95},
+            "vignette": True,
+            "vignetteIntensity": 0.5,
+            "grain": True,
+            "grainIntensity": 0.04,
+        },
+        "cinematic_cool": {
+            "filter": "contrast(1.18) saturate(1.05) brightness(0.92)",
+            "tint": {"r": 0.95, "g": 1.0, "b": 1.08},
+            "vignette": True,
+            "vignetteIntensity": 0.6,
+            "grain": True,
+            "grainIntensity": 0.04,
+        },
+        "dramatic_dark": {
+            "filter": "contrast(1.25) saturate(0.95) brightness(0.85)",
+            "tint": {"r": 0.92, "g": 0.95, "b": 1.0},
+            "vignette": True,
+            "vignetteIntensity": 0.8,
+            "grain": True,
+            "grainIntensity": 0.05,
+        },
+        "natural": {
+            "filter": "contrast(1.05) saturate(1.0) brightness(1.0)",
+            "vignette": False,
+            "grain": False,
+        },
+        "off": {
+            "filter": "none",
+            "vignette": False,
+            "grain": False,
+        },
+    }
+
+    # ════════════════════════════════════════════════════════════════
+    #                    إعدادات Letterbox
+    # ════════════════════════════════════════════════════════════════
+    LETTERBOX_CONFIGS = {
+        "cinematic": {
+            "enabled": True,
+            "barRatio": 0.055,
+            "color": "#000000",
+            "opacity": 0.92,
+        },
+        "thin": {
+            "enabled": True,
+            "barRatio": 0.03,
+            "color": "#000000",
+            "opacity": 1.0,
+        },
+        "thick": {
+            "enabled": True,
+            "barRatio": 0.08,
+            "color": "#000000",
+            "opacity": 1.0,
+        },
+        "off": {
+            "enabled": False,
+        },
+    }
 
     # ════════════════════════════════════════════════════════════════
     def __init__(self, video_width: int = 1080, video_height: int = 1920):
@@ -49,471 +202,206 @@ class EffectsEngine:
         self.fps = int(os.getenv("VIDEO_FPS", "30"))
         self.quality = os.getenv("VIDEO_QUALITY", "high")
 
-        self.temp_dir = Path(os.getenv("TEMP_DIR", "./temp"))
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
-
-        # إعدادات قابلة للتخصيص
+        # إعدادات قابلة للتخصيص من .env
         self.enable_grain = os.getenv("ENABLE_FILM_GRAIN", "true").lower() == "true"
         self.enable_vignette = os.getenv("ENABLE_VIGNETTE", "true").lower() == "true"
+        self.enable_letterbox = os.getenv("ENABLE_LETTERBOX", "true").lower() == "true"
+        self.grade_style = os.getenv("GRADE_STYLE", "cinematic_warm")
+        self.shake_preset = os.getenv("SHAKE_PRESET", "normal")
+        self.letterbox_style = os.getenv("LETTERBOX_STYLE", "cinematic")
 
-        logger.debug(f"🎨 EffectsEngine | {self.w}x{self.h}@{self.fps}fps")
-
-    # ════════════════════════════════════════════════════════════════
-    #                    Scale & Crop
-    # ════════════════════════════════════════════════════════════════
-    def scale_and_crop(self, input_path: str, output_path: str) -> str:
-        """تحجيم وقص الفيديو للأبعاد العمودية المطلوبة."""
-        if not self._validate_input(input_path):
-            return self._safe_copy(input_path, output_path)
-
-        filter_str = (
-            f"scale={self.w}:{self.h}:force_original_aspect_ratio=increase,"
-            f"crop={self.w}:{self.h}"
-        )
-
-        if self._run_ffmpeg(
-            ["-i", input_path, "-vf", filter_str],
-            output_path,
-            description="scale_and_crop",
-        ):
-            return output_path
-
-        return self._safe_copy(input_path, output_path)
+        logger.debug(f"🎨 EffectsEngine (Remotion mode) | {self.w}x{self.h}@{self.fps}fps")
 
     # ════════════════════════════════════════════════════════════════
-    #                    Trim (قص)
+    #                    🆕 دوال إرجاع الإعدادات
     # ════════════════════════════════════════════════════════════════
-    def trim_clip(
-        self,
-        input_path: str,
-        output_path: str,
-        start: float,
-        duration: float,
-    ) -> str:
-        """قص جزء من الفيديو."""
-        if not self._validate_input(input_path):
-            return self._safe_copy(input_path, output_path)
-
-        if self._run_ffmpeg(
-            [
-                "-ss", str(start),
-                "-i", input_path,
-                "-t", str(duration),
-            ],
-            output_path,
-            description=f"trim ({duration:.1f}s)",
-        ):
-            return output_path
-
-        return self._safe_copy(input_path, output_path)
-
-    # ════════════════════════════════════════════════════════════════
-    #                    Zoom Effects
-    # ════════════════════════════════════════════════════════════════
-    def apply_zoom_effect(
-        self,
-        input_path: str,
-        output_path: str,
-        zoom_type: str = "slow_zoom_in",
-        duration: float = 3.0,
-    ) -> str:
+    def get_zoom_config(self, zoom_type: str = "slow_zoom_in") -> Dict:
         """
-        تطبيق تأثير zoom سينمائي.
+        إرجاع إعدادات الـ Zoom لـ Remotion.
 
         Args:
-            zoom_type: slow_zoom_in / slow_zoom_out / drift_right /
-                       drift_left / drift_up / drift_down / punch_zoom / static
-            duration: مدة المقطع بالثواني
-        """
-        if not self._validate_input(input_path):
-            return self._safe_copy(input_path, output_path)
+            zoom_type: slow_zoom_in / slow_zoom_out / punch_zoom /
+                       drift_right / drift_left / drift_up / drift_down / static
 
-        zoom_configs = {
-            "slow_zoom_in": {
-                "z_start": 1.0, "z_end": 1.12,
-                "x_expr": "iw/2-(iw/zoom/2)",
-                "y_expr": "ih/2-(ih/zoom/2)",
+        Returns:
+            dict بإعدادات الزوم لـ Remotion component
+        """
+        config = self.ZOOM_CONFIGS.get(zoom_type, self.ZOOM_CONFIGS["slow_zoom_in"])
+        return {
+            "name": zoom_type,
+            **config,
+        }
+
+    def get_shake_config(self, preset: Optional[str] = None) -> Dict:
+        """
+        إرجاع إعدادات الـ Shake لـ Remotion.
+
+        Args:
+            preset: subtle / normal / intense / off
+        """
+        preset = preset or self.shake_preset
+        config = self.SHAKE_PRESETS.get(preset, self.SHAKE_PRESETS["normal"])
+        return {
+            "name": preset,
+            **config,
+        }
+
+    def get_grade_config(self, style: Optional[str] = None) -> Dict:
+        """
+        إرجاع إعدادات التدرج اللوني لـ Remotion.
+
+        Args:
+            style: cinematic_warm / cinematic_cool / dramatic_dark / natural / off
+        """
+        style = style or self.grade_style
+        config = self.GRADE_CONFIGS.get(style, self.GRADE_CONFIGS["cinematic_warm"]).copy()
+
+        # تعطيل grain/vignette حسب env
+        if not self.enable_grain:
+            config["grain"] = False
+        if not self.enable_vignette:
+            config["vignette"] = False
+
+        return {
+            "name": style,
+            **config,
+        }
+
+    def get_letterbox_config(self, style: Optional[str] = None) -> Dict:
+        """
+        إرجاع إعدادات الـ Letterbox لـ Remotion.
+
+        Args:
+            style: cinematic / thin / thick / off
+        """
+        style = style or self.letterbox_style
+        config = self.LETTERBOX_CONFIGS.get(style, self.LETTERBOX_CONFIGS["cinematic"]).copy()
+
+        # تعطيل حسب env
+        if not self.enable_letterbox:
+            config["enabled"] = False
+
+        return {
+            "name": style,
+            **config,
+        }
+
+    def get_fade_config(
+        self,
+        fade_in_duration: float = 0.5,
+        fade_out_duration: float = 0.5,
+    ) -> Dict:
+        """إعدادات الـ Fade in/out."""
+        return {
+            "fadeIn": {
+                "enabled": True,
+                "duration": fade_in_duration,
+                "color": "#000000",
             },
-            "slow_zoom_out": {
-                "z_start": 1.12, "z_end": 1.0,
-                "x_expr": "iw/2-(iw/zoom/2)",
-                "y_expr": "ih/2-(ih/zoom/2)",
-            },
-            "drift_right": {
-                "z_start": 1.06, "z_end": 1.06,
-                "x_expr": "(iw-iw/zoom)*on/duration",
-                "y_expr": "ih/2-(ih/zoom/2)",
-            },
-            "drift_left": {
-                "z_start": 1.06, "z_end": 1.06,
-                "x_expr": "(iw-iw/zoom)*(1-on/duration)",
-                "y_expr": "ih/2-(ih/zoom/2)",
-            },
-            "drift_up": {
-                "z_start": 1.06, "z_end": 1.06,
-                "x_expr": "iw/2-(iw/zoom/2)",
-                "y_expr": "(ih-ih/zoom)*(1-on/duration)",
-            },
-            "drift_down": {
-                "z_start": 1.06, "z_end": 1.06,
-                "x_expr": "iw/2-(iw/zoom/2)",
-                "y_expr": "(ih-ih/zoom)*on/duration",
+            "fadeOut": {
+                "enabled": True,
+                "duration": fade_out_duration,
+                "color": "#000000",
             },
         }
 
-        # Punch zoom = scale سريع
-        if zoom_type == "punch_zoom":
-            return self._static_scale(input_path, output_path, 1.15)
-
-        # Static = بدون حركة (نسخ مباشر)
-        if zoom_type == "static":
-            return self._static_scale(input_path, output_path, 1.0)
-
-        # Zoompan الديناميكي
-        cfg = zoom_configs.get(zoom_type, zoom_configs["slow_zoom_in"])
-        return self._zoompan(
-            input_path, output_path, duration,
-            z_start=cfg["z_start"],
-            z_end=cfg["z_end"],
-            x_expr=cfg["x_expr"],
-            y_expr=cfg["y_expr"],
-        )
-
-    def _zoompan(
+    def get_flash_config(
         self,
-        inp: str,
-        out: str,
-        duration: float,
-        z_start: float,
-        z_end: float,
-        x_expr: str,
-        y_expr: str,
-    ) -> str:
-        """تطبيق zoompan تدريجي."""
-        n_frames = max(int(duration * self.fps), 1)
-
-        # معادلة الـ zoom التدريجي
-        z_delta = z_end - z_start
-        if abs(z_delta) > 0.001:
-            z_expr = f"{z_start}+{z_delta:.4f}*on/{n_frames}"
-        else:
-            z_expr = str(z_start)
-
-        # filter بدون trim (لتجنب bug)
-        filter_str = (
-            f"zoompan="
-            f"z='{z_expr}':"
-            f"x='{x_expr}':"
-            f"y='{y_expr}':"
-            f"d={n_frames}:"
-            f"s={self.w}x{self.h}:"
-            f"fps={self.fps}"
-        )
-
-        if self._run_ffmpeg(
-            ["-i", inp, "-vf", filter_str, "-t", str(duration)],
-            out,
-            description=f"zoompan ({z_start}→{z_end})",
-        ):
-            return out
-
-        # Fallback إلى static scale
-        logger.warning("⚠ zoompan فشل، استخدام static scale")
-        return self._static_scale(inp, out, (z_start + z_end) / 2)
-
-    def _static_scale(self, inp: str, out: str, scale: float) -> str:
-        """Scale ثابت للفيديو."""
-        sw = int(self.w * scale)
-        sh = int(self.h * scale)
-        # تأكد أن الأبعاد زوجية
-        sw = sw if sw % 2 == 0 else sw + 1
-        sh = sh if sh % 2 == 0 else sh + 1
-
-        if scale == 1.0:
-            # بدون تغيير - نسخ سريع
-            return self._safe_copy(inp, out)
-
-        filter_str = f"scale={sw}:{sh},crop={self.w}:{self.h}"
-
-        if self._run_ffmpeg(
-            ["-i", inp, "-vf", filter_str],
-            out,
-            description=f"static scale ({scale}x)",
-        ):
-            return out
-
-        return self._safe_copy(inp, out)
-
-    # ════════════════════════════════════════════════════════════════
-    #                    Camera Shake
-    # ════════════════════════════════════════════════════════════════
-    def apply_smooth_shake(
-        self,
-        input_path: str,
-        output_path: str,
-        intensity: float = 2.0,
-    ) -> str:
-        """تطبيق اهتزاز طبيعي للكاميرا."""
-        if not self._validate_input(input_path):
-            return self._safe_copy(input_path, output_path)
-
-        margin = max(int(intensity * 2), 4)
-        cw = self.w - margin * 2
-        ch = self.h - margin * 2
-        # تأكد أن الأبعاد زوجية
-        cw = cw if cw % 2 == 0 else cw - 1
-        ch = ch if ch % 2 == 0 else ch - 1
-
-        # حركة طبيعية بدوال مثلثية بترددات مختلفة
-        filter_str = (
-            f"crop={cw}:{ch}:"
-            f"'{margin}+{intensity:.1f}*sin(2*PI*t*0.7)':"
-            f"'{margin}+{intensity:.1f}*cos(2*PI*t*1.1)',"
-            f"scale={self.w}:{self.h}"
-        )
-
-        if self._run_ffmpeg(
-            ["-i", input_path, "-vf", filter_str],
-            output_path,
-            description=f"shake ({intensity})",
-        ):
-            return output_path
-
-        return self._safe_copy(input_path, output_path)
-
-    # ════════════════════════════════════════════════════════════════
-    #                    Loop
-    # ════════════════════════════════════════════════════════════════
-    def loop_clip_to_duration(
-        self,
-        input_path: str,
-        output_path: str,
-        target_duration: float,
-    ) -> str:
-        """تكرار الفيديو حتى يصل للمدة المطلوبة."""
-        if not self._validate_input(input_path):
-            return self._safe_copy(input_path, output_path)
-
-        if self._run_ffmpeg(
-            [
-                "-stream_loop", "-1",
-                "-i", input_path,
-                "-t", str(target_duration),
-            ],
-            output_path,
-            description=f"loop ({target_duration:.1f}s)",
-        ):
-            return output_path
-
-        return self._safe_copy(input_path, output_path)
-
-    # ════════════════════════════════════════════════════════════════
-    #                    Cinematic Color Grading
-    # ════════════════════════════════════════════════════════════════
-    def apply_cinematic_grade(
-        self,
-        input_path: str,
-        output_path: str,
-    ) -> str:
-        """تطبيق تدرج لوني سينمائي احترافي."""
-        if not self._validate_input(input_path):
-            return self._safe_copy(input_path, output_path)
-
-        # بناء filter chain
-        filters = []
-
-        # Color curves (سينمائي دافئ)
-        filters.append(
-            "curves="
-            "r='0/0 0.2/0.19 0.5/0.53 0.8/0.86 1/1':"
-            "g='0/0 0.2/0.19 0.5/0.50 0.8/0.82 1/1':"
-            "b='0/0 0.2/0.23 0.5/0.52 0.8/0.78 1/1'"
-        )
-
-        # Master contrast
-        filters.append("curves=master='0/0 0.15/0.08 0.5/0.5 0.85/0.92 1/1'")
-
-        # Saturation boost
-        filters.append("hue=s=1.12")
-
-        # Vignette (اختياري)
-        if self.enable_vignette:
-            filters.append("vignette=PI/4")
-
-        # Film grain (اختياري)
-        if self.enable_grain:
-            filters.append("noise=alls=4:allf=t+u")
-
-        filter_chain = ",".join(filters)
-
-        # استخدام إعدادات الجودة
-        quality_cfg = self.QUALITY_PRESETS.get(
-            self.quality, self.QUALITY_PRESETS["high"]
-        )
-
-        if self._run_ffmpeg(
-            ["-i", input_path, "-vf", filter_chain],
-            output_path,
-            description="cinematic grade",
-            preset=quality_cfg["preset"],
-            crf=quality_cfg["crf"],
-            keep_audio=True,
-        ):
-            return output_path
-
-        return self._safe_copy(input_path, output_path)
-
-    # ════════════════════════════════════════════════════════════════
-    #                    Letterbox
-    # ════════════════════════════════════════════════════════════════
-    def add_letterbox(
-        self,
-        input_path: str,
-        output_path: str,
-        bar_ratio: float = 0.055,
-    ) -> str:
-        """إضافة شرائط سوداء علوية وسفلية (سينمائي)."""
-        if not self._validate_input(input_path):
-            return self._safe_copy(input_path, output_path)
-
-        bar_h = int(self.h * bar_ratio)
-
-        filter_str = (
-            f"drawbox=x=0:y=0:w={self.w}:h={bar_h}:color=black@0.92:t=fill,"
-            f"drawbox=x=0:y={self.h-bar_h}:w={self.w}:h={bar_h}:"
-            f"color=black@0.92:t=fill"
-        )
-
-        if self._run_ffmpeg(
-            ["-i", input_path, "-vf", filter_str],
-            output_path,
-            description="letterbox",
-            keep_audio=True,
-        ):
-            return output_path
-
-        return self._safe_copy(input_path, output_path)
-
-    # ════════════════════════════════════════════════════════════════
-    #                    تأثيرات إضافية
-    # ════════════════════════════════════════════════════════════════
-    def apply_flash(
-        self,
-        input_path: str,
-        output_path: str,
         intensity: float = 1.5,
         duration: float = 0.2,
-    ) -> str:
-        """تطبيق فلاش أبيض في البداية."""
-        if not self._validate_input(input_path):
-            return self._safe_copy(input_path, output_path)
+    ) -> Dict:
+        """إعدادات تأثير الفلاش."""
+        return {
+            "enabled": True,
+            "intensity": intensity,
+            "duration": duration,
+            "color": "#FFFFFF",
+        }
 
-        filter_str = (
-            f"eq=brightness=0:contrast=1:saturation=1,"
-            f"fade=t=in:st=0:d={duration}:color=white"
-        )
-
-        if self._run_ffmpeg(
-            ["-i", input_path, "-vf", filter_str],
-            output_path,
-            description="flash",
-        ):
-            return output_path
-
-        return self._safe_copy(input_path, output_path)
-
-    def apply_glitch(
+    def get_glitch_config(
         self,
-        input_path: str,
-        output_path: str,
         intensity: float = 0.5,
-    ) -> str:
-        """تطبيق تأثير glitch."""
-        if not self._validate_input(input_path):
-            return self._safe_copy(input_path, output_path)
+    ) -> Dict:
+        """إعدادات تأثير الـ Glitch."""
+        return {
+            "enabled": True,
+            "intensity": intensity,
+            "chromaShift": 2,
+            "noise": int(intensity * 30),
+        }
 
-        filter_str = (
-            f"noise=alls={int(intensity*30)}:allf=t,"
-            f"chromashift=cbh=2:crv=2"
-        )
-
-        if self._run_ffmpeg(
-            ["-i", input_path, "-vf", filter_str],
-            output_path,
-            description="glitch",
-        ):
-            return output_path
-
-        return self._safe_copy(input_path, output_path)
-
-    def apply_blur(
-        self,
-        input_path: str,
-        output_path: str,
-        sigma: float = 5.0,
-    ) -> str:
-        """تطبيق ضبابية."""
-        if not self._validate_input(input_path):
-            return self._safe_copy(input_path, output_path)
-
-        if self._run_ffmpeg(
-            ["-i", input_path, "-vf", f"gblur=sigma={sigma}"],
-            output_path,
-            description=f"blur ({sigma})",
-        ):
-            return output_path
-
-        return self._safe_copy(input_path, output_path)
-
-    def apply_fade_in(
-        self,
-        input_path: str,
-        output_path: str,
-        duration: float = 1.0,
-    ) -> str:
-        """fade in من الأسود."""
-        if not self._validate_input(input_path):
-            return self._safe_copy(input_path, output_path)
-
-        if self._run_ffmpeg(
-            ["-i", input_path, "-vf", f"fade=t=in:st=0:d={duration}"],
-            output_path,
-            description=f"fade_in ({duration}s)",
-        ):
-            return output_path
-
-        return self._safe_copy(input_path, output_path)
-
-    def apply_fade_out(
-        self,
-        input_path: str,
-        output_path: str,
-        duration: float = 1.0,
-        video_duration: Optional[float] = None,
-    ) -> str:
-        """fade out إلى الأسود."""
-        if not self._validate_input(input_path):
-            return self._safe_copy(input_path, output_path)
-
-        # إذا لم تُحدد مدة الفيديو، احسبها
-        if video_duration is None:
-            video_duration = self._get_duration(input_path)
-
-        start = max(video_duration - duration, 0)
-
-        if self._run_ffmpeg(
-            ["-i", input_path, "-vf", f"fade=t=out:st={start}:d={duration}"],
-            output_path,
-            description=f"fade_out ({duration}s)",
-        ):
-            return output_path
-
-        return self._safe_copy(input_path, output_path)
+    def get_blur_config(self, sigma: float = 5.0) -> Dict:
+        """إعدادات تأثير الـ Blur."""
+        return {
+            "enabled": True,
+            "sigma": sigma,
+            "filter": f"blur({sigma}px)",
+        }
 
     # ════════════════════════════════════════════════════════════════
-    #                    دوال مساعدة داخلية
+    #                    🆕 الدالة الشاملة للمشاهد
     # ════════════════════════════════════════════════════════════════
-    def _validate_input(self, path: str) -> bool:
+    def get_all_effects_for_scene(
+        self,
+        scene_type: str = "main",
+        zoom_type: str = "slow_zoom_in",
+        apply_shake: bool = False,
+    ) -> Dict:
+        """
+        إرجاع كل تأثيرات المشهد دفعة واحدة لـ Remotion.
+
+        Args:
+            scene_type: hook / build / peak / resolution / cta / main
+            zoom_type: نوع الزوم
+            apply_shake: تطبيق الاهتزاز؟
+
+        Returns:
+            dict شامل بكل التأثيرات
+        """
+        return {
+            "sceneType": scene_type,
+            "zoom": self.get_zoom_config(zoom_type),
+            "shake": self.get_shake_config(
+                "normal" if apply_shake else "off"
+            ),
+            "grade": self.get_grade_config(),
+            "letterbox": self.get_letterbox_config(),
+        }
+
+    def get_global_effects(self) -> Dict:
+        """
+        إرجاع التأثيرات العامة (للفيديو كاملاً).
+
+        Returns:
+            dict يحتوي: grade, letterbox, fade
+        """
+        return {
+            "grade": self.get_grade_config(),
+            "letterbox": self.get_letterbox_config(),
+            "fade": self.get_fade_config(),
+        }
+
+    # ════════════════════════════════════════════════════════════════
+    #                    دوال مساعدة
+    # ════════════════════════════════════════════════════════════════
+    def list_available_zooms(self) -> List[str]:
+        """قائمة أنواع الـ Zoom المتاحة."""
+        return list(self.ZOOM_CONFIGS.keys())
+
+    def list_available_grades(self) -> List[str]:
+        """قائمة أنماط التدرج اللوني المتاحة."""
+        return list(self.GRADE_CONFIGS.keys())
+
+    def list_available_shakes(self) -> List[str]:
+        """قائمة إعدادات الاهتزاز المتاحة."""
+        return list(self.SHAKE_PRESETS.keys())
+
+    def list_available_letterboxes(self) -> List[str]:
+        """قائمة أنماط الـ Letterbox المتاحة."""
+        return list(self.LETTERBOX_CONFIGS.keys())
+
+    @staticmethod
+    def validate_input(path: str) -> bool:
         """التحقق من وجود الملف."""
         if not Path(path).exists():
             logger.error(f"❌ الملف غير موجود: {path}")
@@ -523,97 +411,87 @@ class EffectsEngine:
             return False
         return True
 
-    def _run_ffmpeg(
-        self,
-        args: list,
-        output_path: str,
-        description: str = "FFmpeg",
-        preset: str = "fast",
-        crf: int = 22,
-        keep_audio: bool = False,
-    ) -> bool:
-        """تشغيل FFmpeg مع إعدادات موحدة."""
-        cmd = (
-            ["ffmpeg", "-y", "-loglevel", "error"]
-            + args
-            + [
-                "-c:v", "libx264",
-                "-preset", preset,
-                "-crf", str(crf),
-                "-pix_fmt", "yuv420p",
-                "-r", str(self.fps),
-            ]
+    # ════════════════════════════════════════════════════════════════
+    #                    🔁 دوال Legacy (Deprecated)
+    # ════════════════════════════════════════════════════════════════
+    def apply_zoom_effect(self, *args, **kwargs):
+        """⚠️ DEPRECATED: استخدم get_zoom_config() بدلاً منها."""
+        raise DeprecationWarning(
+            "❌ apply_zoom_effect() لم تعد مدعومة!\n"
+            "   استخدم: get_zoom_config(zoom_type)\n"
+            "   ثم مرّر النتيجة لـ Remotion في props"
         )
 
-        if keep_audio:
-            cmd += ["-c:a", "copy"]
-        else:
-            cmd += ["-an"]
+    def apply_smooth_shake(self, *args, **kwargs):
+        """⚠️ DEPRECATED: استخدم get_shake_config() بدلاً منها."""
+        raise DeprecationWarning(
+            "❌ apply_smooth_shake() لم تعد مدعومة!\n"
+            "   استخدم: get_shake_config(preset)"
+        )
 
-        cmd.append(output_path)
+    def apply_cinematic_grade(self, *args, **kwargs):
+        """⚠️ DEPRECATED: استخدم get_grade_config() بدلاً منها."""
+        raise DeprecationWarning(
+            "❌ apply_cinematic_grade() لم تعد مدعومة!\n"
+            "   استخدم: get_grade_config(style)"
+        )
 
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                timeout=self.DEFAULT_TIMEOUT,
-            )
-            if result.returncode == 0:
-                return True
-            else:
-                err = result.stderr.decode("utf-8", errors="ignore")[:200]
-                logger.warning(f"⚠ {description} failed: {err}")
-                return False
-        except subprocess.TimeoutExpired:
-            logger.error(f"❌ {description} timeout")
-            return False
-        except Exception as e:
-            logger.error(f"❌ {description} error: {e}")
-            return False
+    def add_letterbox(self, *args, **kwargs):
+        """⚠️ DEPRECATED: استخدم get_letterbox_config() بدلاً منها."""
+        raise DeprecationWarning(
+            "❌ add_letterbox() لم تعد مدعومة!\n"
+            "   استخدم: get_letterbox_config(style)"
+        )
 
-    def _safe_copy(self, src: str, dst: str) -> str:
-        """نسخ آمن."""
-        try:
-            if Path(src).exists() and src != dst:
-                shutil.copy(src, dst)
-        except Exception as e:
-            logger.error(f"❌ فشل النسخ: {e}")
-        return dst
+    def scale_and_crop(self, *args, **kwargs):
+        """⚠️ DEPRECATED: Remotion يتعامل مع الأبعاد تلقائياً."""
+        raise DeprecationWarning(
+            "❌ scale_and_crop() لم تعد ضرورية!\n"
+            "   Remotion يتعامل مع الأبعاد عبر CSS object-fit"
+        )
 
-    def _get_duration(self, path: str) -> float:
-        """الحصول على مدة الفيديو."""
-        try:
-            result = subprocess.run(
-                [
-                    "ffprobe", "-v", "quiet",
-                    "-show_entries", "format=duration",
-                    "-of", "default=noprint_wrappers=1:nokey=1",
-                    path,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=True,
-            )
-            return float(result.stdout.strip())
-        except Exception as e:
-            logger.warning(f"⚠ فشل قراءة المدة: {e}")
-            return 5.0
+    def trim_clip(self, *args, **kwargs):
+        """⚠️ DEPRECATED: Remotion يقص تلقائياً عبر startFrom/endAt."""
+        raise DeprecationWarning(
+            "❌ trim_clip() لم تعد ضرورية!\n"
+            "   Remotion يستخدم: <Video startFrom={...} endAt={...} />"
+        )
+
+    def loop_clip_to_duration(self, *args, **kwargs):
+        """⚠️ DEPRECATED: Remotion يكرر تلقائياً عبر <Loop>."""
+        raise DeprecationWarning(
+            "❌ loop_clip_to_duration() لم تعد ضرورية!\n"
+            "   Remotion يستخدم: <Loop>...</Loop>"
+        )
 
 
 # ════════════════════════════════════════════════════════════════════════
 #                    اختبار سريع
 # ════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    import sys
-
-    if len(sys.argv) < 3:
-        print("Usage: python effects_engine.py <input.mp4> <output.mp4> [zoom_type]")
-        sys.exit(1)
+    import json
 
     fx = EffectsEngine()
-    zoom = sys.argv[3] if len(sys.argv) > 3 else "slow_zoom_in"
 
-    print(f"🎨 Applying {zoom}...")
-    fx.apply_zoom_effect(sys.argv[1], sys.argv[2], zoom, 5.0)
-    print(f"✓ Done: {sys.argv[2]}")
+    print("✓ EffectsEngine (Remotion mode) جاهز")
+    print(f"  Dimensions: {fx.w}x{fx.h}")
+    print(f"  FPS: {fx.fps}")
+    print(f"  Grade style: {fx.grade_style}")
+    print(f"  Letterbox: {fx.letterbox_style}")
+    print(f"  Shake: {fx.shake_preset}")
+
+    print("\n📦 Available zooms:")
+    for z in fx.list_available_zooms():
+        print(f"   • {z}")
+
+    print("\n📦 Available grades:")
+    for g in fx.list_available_grades():
+        print(f"   • {g}")
+
+    print("\n🎨 Sample scene effects (hook):")
+    effects = fx.get_all_effects_for_scene(
+        scene_type="hook",
+        zoom_type="punch_zoom",
+        apply_shake=True,
+    )
+    print(json.dumps(effects, indent=2, ensure_ascii=False))
