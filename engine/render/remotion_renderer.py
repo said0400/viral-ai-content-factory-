@@ -8,8 +8,9 @@
   ✓ Thumbnails متعددة (عبر FFmpeg المساعد)
   ✓ تحقق من حجم الملف
   ✓ تنظيف ذكي للملفات المؤقتة
-  ✓ 🆕 Verbose logging للتشخيص
-  ✓ 🆕 التحقق من الملفات قبل البدء
+  ✓ Verbose logging للتشخيص
+  ✓ التحقق من الملفات قبل البدء
+  ✓ 🆕 استخدام absolute paths دائماً
 
 ضع في: engine/render/remotion_renderer.py
 ═══════════════════════════════════════════════════════════════
@@ -42,13 +43,13 @@ class RemotionRenderer:
         "high": {
             "crf":          "19",
             "jpeg_quality": "90",
-            "concurrency":  "2",  # 🆕 خفّضت من 4 لأن GitHub Actions ضعيف
+            "concurrency":  "2",
             "audio_bitrate": "192k",
         },
         "ultra": {
             "crf":          "17",
             "jpeg_quality": "95",
-            "concurrency":  "4",  # 🆕 خفّضت من 8
+            "concurrency":  "4",
             "audio_bitrate": "256k",
         },
     }
@@ -69,7 +70,6 @@ class RemotionRenderer:
         "twitter":        512,
     }
 
-    # 🆕 timeout أقصر (10 دقائق)
     DEFAULT_TIMEOUT = 600
 
     # ════════════════════════════════════════════════════════════════
@@ -79,8 +79,8 @@ class RemotionRenderer:
         self.h = int(os.getenv("VIDEO_HEIGHT", "1920"))
         self.fps = int(os.getenv("VIDEO_FPS",  "30"))
 
-        self.temp_dir = Path(os.getenv("TEMP_DIR",   "./temp"))
-        self.out_dir = Path(os.getenv("OUTPUT_DIR", "./output"))
+        self.temp_dir = Path(os.getenv("TEMP_DIR",   "./temp")).resolve()
+        self.out_dir = Path(os.getenv("OUTPUT_DIR", "./output")).resolve()
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -103,6 +103,7 @@ class RemotionRenderer:
             f"🎬 RemotionRenderer | {self.w}x{self.h}@{self.fps}fps"
         )
         logger.info(f"   📁 Remotion dir: {self.remotion_dir}")
+        logger.info(f"   📁 Temp dir: {self.temp_dir}")
 
     def _check_node(self) -> None:
         """التحقق من تثبيت Node.js."""
@@ -163,13 +164,13 @@ class RemotionRenderer:
         # تحديد الـ Composition
         comp_id = composition_id or self.composition_id
 
-        # التأكد من وجود مجلد الإخراج
+        # 🆕 التأكد من أن output_path مطلق
         output_path = str(Path(output_path).resolve())
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"🚀 التصدير بـ Remotion [{quality}] | Composition: {comp_id}")
 
-        # 🆕 1) فحص Props قبل البدء
+        # 1) فحص Props قبل البدء
         self._validate_props(props)
 
         # 2) كتابة props إلى ملف JSON مؤقت
@@ -198,7 +199,7 @@ class RemotionRenderer:
             return output_path
 
         finally:
-            # 🆕 لا نحذف props_file حتى نقدر نُشخّص الأخطاء
+            # نحتفظ بـ props.json للتشخيص
             logger.info(f"📝 Props file kept for debugging: {props_file}")
 
     # 🆕 فحص Props قبل البدء
@@ -272,11 +273,13 @@ class RemotionRenderer:
         with open(props_file, "w", encoding="utf-8") as f:
             json.dump(props, f, ensure_ascii=False, indent=2)
 
-        # 🆕 معلومات تشخيصية
-        file_size_kb = props_file.stat().st_size / 1024
-        logger.info(f"📝 Props written: {props_file} ({file_size_kb:.1f} KB)")
+        # 🆕 إرجاع المسار المطلق (مهم جداً!)
+        absolute_path = str(props_file.resolve())
 
-        return str(props_file)
+        file_size_kb = props_file.stat().st_size / 1024
+        logger.info(f"📝 Props written: {absolute_path} ({file_size_kb:.1f} KB)")
+
+        return absolute_path
 
     def _run_remotion(
         self,
@@ -286,6 +289,15 @@ class RemotionRenderer:
         cfg: dict,
     ) -> None:
         """تشغيل أمر Remotion render مع verbose logging."""
+
+        # 🆕 التأكد أن كل المسارات مطلقة
+        props_file = str(Path(props_file).resolve())
+        output_path = str(Path(output_path).resolve())
+
+        # 🆕 التحقق من وجود ملف props
+        if not Path(props_file).exists():
+            raise FileNotFoundError(f"❌ Props file not found: {props_file}")
+
         cmd = [
             "npx", "remotion", "render",
             "src/index.ts",
@@ -297,11 +309,7 @@ class RemotionRenderer:
             "--crf", cfg["crf"],
             "--codec", "h264",
             "--pixel-format", "yuv420p",
-            # 🆕 verbose logging
             "--log", "verbose",
-            # 🆕 تعطيل المعاينة في headless
-            "--browser-executable", "",
-            # 🆕 timeout للـ delayRender (مهم جداً!)
             "--timeout", "30000",
         ]
 
@@ -317,12 +325,10 @@ class RemotionRenderer:
         logger.info("=" * 60)
 
         try:
-            # 🆕 طباعة الـ stdout/stderr مباشرة (live)
             result = subprocess.run(
                 cmd,
                 cwd=str(self.remotion_dir),
                 timeout=self.DEFAULT_TIMEOUT,
-                # ❌ لا نستخدم capture_output لنرى الـ output مباشرة
             )
 
             if result.returncode != 0:
