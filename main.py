@@ -1,21 +1,21 @@
 """
-🎬 Viral AI Content Factory — main.py (v2.0 - Remotion Edition)
+🎬 Viral AI Content Factory — main.py (v2.1 - Optimized Edition)
 ═══════════════════════════════════════════════════════════════════
 مولّد فيديوهات Shorts عربية احترافية بالذكاء الاصطناعي
 
-التغييرات في v2.0:
-  ✓ استبدال FFmpeg بـ Remotion للتصدير
-  ✓ دعم كامل للعربية (RTL + Arabic Shaping)
-  ✓ سرعة أكبر بـ 5-10x في الترجمات
-  ✓ تأثيرات احترافية بـ React/CSS
-  ✓ معاينة مباشرة (Live Preview)
+التغييرات في v2.1:
+  ✓ إضافة AudioOptimizer (إزالة فراغات + تسريع)
+  ✓ Whisper subtitles (TikTok style)
+  ✓ Gemini TTS (احترافي)
+  ✓ Viral Prompt Engine v3.0
+  ✓ Remotion للتصدير
 
 الميزات:
-  ✓ Groq (أساسي) + Gemini (احتياطي) للسكربتات
-  ✓ edge-tts (أساسي) + ElevenLabs (احتياطي) للصوت
-  ✓ Pexels + Pixabay لمصادر الفيديو
-  ✓ موسيقى خلفية + مؤثرات صوتية
-  ✓ ترجمة عربية احترافية بـ Remotion (RTL تلقائي)
+  ✓ Groq + Gemini للسكربتات
+  ✓ Edge-TTS / ElevenLabs / Gemini للصوت
+  ✓ Pexels + Pixabay للفيديو
+  ✓ موسيقى خلفية + مؤثرات
+  ✓ ترجمة عربية احترافية
   ✓ نشر تلقائي على GitHub Releases
 ═══════════════════════════════════════════════════════════════════
 """
@@ -45,7 +45,7 @@ from engine.voice.music_engine      import MusicEngine
 from engine.video                   import build_complete_props
 from engine.render                  import (
     RemotionRenderer,
-    FFmpegBuilder,        # legacy fallback
+    FFmpegBuilder,
     REMOTION_AVAILABLE,
     FFMPEG_AVAILABLE,
 )
@@ -72,8 +72,8 @@ def banner() -> None:
     """عرض شعار البداية."""
     log("━" * 60, "cyan")
     log("  🎬  VIRAL AI CONTENT FACTORY", "bold")
-    log("  Arabic Cinematic Shorts Generator v2.0", "info")
-    log("  ⭐ Remotion Edition (Perfect Arabic)", "ok")
+    log("  Arabic Cinematic Shorts Generator v2.1", "info")
+    log("  ⭐ Remotion + Whisper + Audio Optimizer", "ok")
     log("━" * 60, "cyan")
 
 
@@ -108,11 +108,16 @@ def check_env(use_remotion: bool = True) -> bool:
     else:
         log("  ⚠ PIXABAY_API_KEY مفقود", "warn")
 
-    # --- ElevenLabs (احتياطي) ---
-    if os.getenv("ELEVENLABS_API_KEY"):
-        log("  ✓ ELEVENLABS_API_KEY (احتياطي للصوت)", "ok")
-    else:
-        log("  ℹ ElevenLabs غير مفعّل — سيُستخدم edge-tts (مجاني)", "info")
+    # --- TTS Engines ---
+    tts_engine = os.getenv("TTS_ENGINE", "edge").lower()
+    log(f"  ℹ TTS Engine: {tts_engine}", "info")
+    
+    if tts_engine == "elevenlabs" and os.getenv("ELEVENLABS_API_KEY"):
+        log("  ✓ ELEVENLABS_API_KEY", "ok")
+    elif tts_engine == "gemini" and os.getenv("GEMINI_API_KEY"):
+        log("  ✓ Gemini TTS متاح", "ok")
+    elif tts_engine == "edge":
+        log("  ✓ Edge TTS (مجاني)", "ok")
 
     # --- 🆕 فحص Remotion ---
     log("\n🎬 فحص محرك التصدير...", "cyan")
@@ -141,7 +146,6 @@ def check_env(use_remotion: bool = True) -> bool:
         if remotion_dir.exists():
             log(f"  ✓ Remotion directory: {remotion_dir}", "ok")
 
-            # فحص node_modules
             if (remotion_dir / "node_modules").exists():
                 log("  ✓ Remotion installed", "ok")
             else:
@@ -150,17 +154,15 @@ def check_env(use_remotion: bool = True) -> bool:
                 ok = False
         else:
             log(f"  ✗ Remotion directory not found: {remotion_dir}", "err")
-            log("    أنشئ مجلد remotion أولاً", "info")
             ok = False
 
-        # فحص REMOTION_AVAILABLE
         if REMOTION_AVAILABLE:
             log("  ✓ RemotionRenderer module loaded", "ok")
         else:
             log("  ✗ RemotionRenderer module failed to load", "err")
             ok = False
 
-    # --- FFmpeg (مطلوب دائماً لـ thumbnails) ---
+    # --- FFmpeg ---
     try:
         result = subprocess.run(
             ["ffmpeg", "-version"],
@@ -169,11 +171,11 @@ def check_env(use_remotion: bool = True) -> bool:
             timeout=10,
         )
         if result.returncode == 0:
-            log("  ✓ FFmpeg (للـ thumbnails)", "ok")
+            log("  ✓ FFmpeg", "ok")
         else:
-            log("  ⚠ FFmpeg غير متاح (الـ thumbnails لن تعمل)", "warn")
+            log("  ⚠ FFmpeg غير متاح", "warn")
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        log("  ⚠ FFmpeg غير مثبت (الـ thumbnails لن تعمل)", "warn")
+        log("  ⚠ FFmpeg غير مثبت", "warn")
 
     return ok
 
@@ -186,7 +188,7 @@ def safe_filename(topic: str, max_len: int = 25) -> str:
     return safe or "video"
 
 
-# ─── 🆕 توليد الفيديو بـ Remotion ─────────────────────────────────────────
+# ─── 🆕 توليد الفيديو ────────────────────────────────────────────────────
 def generate_video(
     topic: str,
     output_dir: str,
@@ -201,10 +203,10 @@ def generate_video(
     Args:
         topic: موضوع الفيديو
         output_dir: مجلد الإخراج
-        content_type: نوع المحتوى (motivational/educational/story/quote)
+        content_type: نوع المحتوى
         duration: المدة المستهدفة بالثواني
-        quality: جودة التصدير (medium/high/ultra)
-        use_remotion: استخدام Remotion (افتراضي) أم FFmpeg القديم
+        quality: جودة التصدير
+        use_remotion: استخدام Remotion (افتراضي)
 
     Returns:
         مسار الفيديو الناتج
@@ -248,21 +250,35 @@ def generate_video(
         log(f"  ✓ {len(script['scenes'])} مشهد | ~{script['duration_estimate']:.0f}s", "ok")
         log(f"  ✓ Hook: {script['hook'][:60]}...", "info")
 
-        # ── 2: الصوت ────────────────────────────────────────────────
+        # ── 2: الصوت + التحسين ──────────────────────────────────────
         log("\n[2/5] 🎙️  توليد الصوت...", "cyan")
         raw_voice = str(tmp / "voice_raw.mp3")
         tts.generate_audio(script, raw_voice)
 
-        breathed   = str(tmp / "voice_breath.mp3")
+        breathed = str(tmp / "voice_breath.mp3")
         proc_voice = str(tmp / "voice_processed.mp3")
+        optimized_voice = str(tmp / "voice_optimized.mp3")
 
         breath.add_breathing(raw_voice, breathed)
         fx.process_voice(breathed, proc_voice)
 
+        # 🆕 تحسين الصوت (إزالة فراغات + تسريع + تطبيع)
+        log("  🎵 تحسين الصوت (إزالة فراغات + تسريع)...", "cyan")
+        try:
+            from engine.voice.audio_optimizer import AudioOptimizer
+            audio_opt = AudioOptimizer()
+            audio_opt.optimize(proc_voice, optimized_voice)
+            proc_voice = optimized_voice  # استخدم النسخة المحسّنة
+            log("  ✓ تم تحسين الصوت", "ok")
+        except ImportError:
+            log("  ⚠ AudioOptimizer غير متوفر، استخدام الصوت الأصلي", "warn")
+        except Exception as e:
+            log(f"  ⚠ فشل تحسين الصوت: {e}", "warn")
+
+        # تحديث مدة الصوت بعد التحسين
         audio_dur = fx.get_audio_duration(proc_voice)
-        # استخدام مدة الصوت الفعلية (مع حد أقصى 60 ثانية لـ Shorts)
         script["duration_estimate"] = min(audio_dur + 1.5, 60.0)
-        log(f"  ✓ مدة الصوت: {audio_dur:.1f}s", "ok")
+        log(f"  ✓ مدة الصوت النهائية: {audio_dur:.1f}s", "ok")
 
         # ── 3: مزج الصوت ────────────────────────────────────────────
         log("\n[3/5] 🎵 مزج الصوت...", "cyan")
@@ -303,7 +319,6 @@ def generate_video(
         log("\n[4/5] 🎬 بناء props لـ Remotion...", "cyan")
 
         if use_remotion and isinstance(renderer, RemotionRenderer):
-            # 🆕 الطريقة الجديدة (Remotion)
             props = build_complete_props(
                 script=script,
                 audio_path=final_audio,
@@ -313,18 +328,6 @@ def generate_video(
             log(f"  ✓ {props['meta']['totalSubtitles']} ترجمة", "ok")
             log(f"  ✓ {props['meta']['totalTransitions']} انتقال", "ok")
         else:
-            # 🔁 الطريقة القديمة (FFmpeg) - للتوافق
-            from engine.video.cinematic_editor import CinematicEditor
-            from engine.video.subtitle_engine import SubtitleEngine
-
-            log("  ⚠ Using legacy FFmpeg mode", "warn")
-            editor = CinematicEditor()
-            sub_engine = SubtitleEngine(
-                int(os.getenv("VIDEO_WIDTH", "1080")),
-                int(os.getenv("VIDEO_HEIGHT", "1920")),
-            )
-            # هذا لن يعمل بعد التحويل - سيرمي DeprecationWarning
-            # احتُفظ به فقط للوضوح
             log("  ❌ Legacy mode غير مدعوم بعد التحويل", "err")
             raise NotImplementedError(
                 "Legacy FFmpeg mode تم إيقافه. استخدم Remotion."
@@ -341,7 +344,7 @@ def generate_video(
                 metadata={
                     "title":       script.get("title", topic),
                     "description": script.get("hook", ""),
-                    "comment":     f"Generated by AI Shorts Factory v2.0 | {content_type}",
+                    "comment":     f"Generated by AI Shorts Factory v2.1 | {content_type}",
                 },
             )
 
@@ -366,6 +369,8 @@ def generate_video(
                 f.write(f"Hook: {script.get('hook', '')}\n")
                 f.write(f"Generated: {ts}\n")
                 f.write(f"Renderer: {'Remotion' if use_remotion else 'FFmpeg'}\n")
+                f.write(f"TTS Engine: {os.getenv('TTS_ENGINE', 'edge')}\n")
+                f.write(f"Audio Speed: {os.getenv('AUDIO_SPEED', '1.0')}x\n")
             log(f"  ✓ Info: {Path(info_file).name}", "ok")
         except Exception:
             pass
@@ -394,7 +399,7 @@ def generate_video(
 # ─── الدالة الرئيسية ──────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(
-        description="🎬 Viral AI Content Factory v2.0 - Arabic Shorts Generator (Remotion Edition)",
+        description="🎬 Viral AI Content Factory v2.1 - Optimized Edition",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -429,12 +434,10 @@ def main():
         "--batch", type=str, nargs="+",
         help="توليد عدة فيديوهات (مواضيع متعددة)",
     )
-    # 🆕 خيار للرجوع لـ FFmpeg (للأمان)
     parser.add_argument(
         "--use-ffmpeg", action="store_true",
         help="استخدام FFmpeg القديم بدلاً من Remotion (Legacy)",
     )
-    # 🆕 خيار للفحص فقط
     parser.add_argument(
         "--check", action="store_true",
         help="فحص البيئة فقط بدون توليد فيديو",
@@ -443,7 +446,6 @@ def main():
 
     banner()
 
-    # تحديد المحرك
     use_remotion = not args.use_ffmpeg
 
     if args.use_ffmpeg:
@@ -509,7 +511,6 @@ def main():
             status = "✅" if ok else "❌"
             log(f"  {status} {topic}", "ok" if ok else "err")
 
-    # خروج بكود خطأ إذا فشل أي فيديو
     if any(not ok for _, ok, _ in results):
         sys.exit(1)
 
