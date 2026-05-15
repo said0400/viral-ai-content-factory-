@@ -1,4 +1,4 @@
-name: 🎬 Generate Arabic Shorts (Remotion + Gemini TTS)
+name: 🎬 Generate Arabic Shorts (Optimized Edition v2.1)
 
 on:
   workflow_dispatch:
@@ -7,6 +7,7 @@ on:
         description: "📝 موضوع الفيديو"
         required: false
         default: "الطموح والنجاح"
+      
       content_type:
         description: "🎭 نوع المحتوى"
         required: false
@@ -18,7 +19,7 @@ on:
           - story
           - quote
       
-      # 🆕 اختيار محرك TTS
+      # 🎙️ اختيار محرك TTS
       tts_engine:
         description: "🎙️ محرك الصوت"
         required: false
@@ -30,7 +31,7 @@ on:
           - elevenlabs
       
       voice:
-        description: "🎙️ صوت Edge TTS (إذا اخترت edge)"
+        description: "🎙️ صوت Edge TTS"
         required: false
         default: "ar-SA-HamedNeural"
         type: choice
@@ -40,9 +41,8 @@ on:
           - ar-EG-ShakirNeural
           - ar-EG-SalmaNeural
       
-      # 🆕 صوت Gemini
       gemini_voice:
-        description: "🎤 صوت Gemini (إذا اخترت gemini)"
+        description: "🎤 صوت Gemini"
         required: false
         default: "Achird"
         type: choice
@@ -53,12 +53,37 @@ on:
           - Charon
           - Kore
       
+      # 🆕 سرعة الصوت
+      audio_speed:
+        description: "⚡ سرعة الصوت (1.0=طبيعي, 1.1=سريع TikTok)"
+        required: false
+        default: "1.1"
+        type: choice
+        options:
+          - "1.0"
+          - "1.05"
+          - "1.1"
+          - "1.15"
+          - "1.2"
+          - "1.25"
+      
+      # 🆕 إزالة الفراغات
+      remove_silence:
+        description: "🔇 إزالة الفراغات الطويلة"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      
       duration:
         description: "⏱️ مدة الفيديو (ثانية)"
         required: false
         default: "45"
         type: choice
         options: ["30", "45", "60"]
+      
       quality:
         description: "✨ جودة التصدير"
         required: false
@@ -170,6 +195,7 @@ jobs:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           REMOTION_DIR: ./remotion
+          TTS_ENGINE: ${{ github.event.inputs.tts_engine }}
         run: |
           python main.py --check || echo "⚠ Some checks failed but continuing"
 
@@ -187,6 +213,7 @@ jobs:
           # 🆕 Gemini TTS
           GEMINI_VOICE: ${{ github.event.inputs.gemini_voice }}
           GEMINI_STYLE: ${{ github.event.inputs.content_type }}
+          GEMINI_TEMPERATURE: "1.0"
           
           # 🎙️ ElevenLabs
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
@@ -207,6 +234,16 @@ jobs:
           ENABLE_BACKGROUND_MUSIC: "true"
           MUSIC_VOLUME: "0.15"
           
+          # 🆕🆕🆕 Audio Optimizer Settings 🆕🆕🆕
+          AUDIO_SPEED: ${{ github.event.inputs.audio_speed }}
+          REMOVE_SILENCE: ${{ github.event.inputs.remove_silence }}
+          SPEED_UP_AUDIO: "true"
+          NORMALIZE_AUDIO: "true"
+          ENHANCE_AUDIO: "true"
+          SILENCE_THRESHOLD_DB: "-35"
+          MIN_SILENCE_DURATION: "0.4"
+          KEEP_SILENCE_DURATION: "0.15"
+          
           # 📁 Paths
           OUTPUT_DIR: ./output
           TEMP_DIR: ./temp
@@ -216,7 +253,7 @@ jobs:
           USE_REMOTION: "true"
           REMOTION_COMPOSITION: "ShortsVideo"
           
-          # 🎤 Whisper
+          # 🎤 Whisper (Word-Level Subtitles)
           USE_WHISPER: "true"
           WHISPER_MODEL: "small"
           WHISPER_MAX_WORDS: "4"
@@ -277,15 +314,19 @@ jobs:
             **🎭 النوع:** ${{ github.event.inputs.content_type }}
             **🎙️ محرك الصوت:** ${{ github.event.inputs.tts_engine }}
             **🎤 الصوت:** ${{ github.event.inputs.tts_engine == 'gemini' && github.event.inputs.gemini_voice || github.event.inputs.voice }}
+            **⚡ سرعة الصوت:** ${{ github.event.inputs.audio_speed }}x
+            **🔇 إزالة الفراغات:** ${{ github.event.inputs.remove_silence }}
             **⏱️ المدة:** ${{ github.event.inputs.duration }} ثانية
             **✨ الجودة:** ${{ github.event.inputs.quality }}
             **📦 الحجم:** ${{ steps.video_info.outputs.video_size }}
 
             ---
-            🤖 **Remotion + Gemini TTS Edition** v2.1
+            🤖 **Optimized Edition v2.1**
             🎬 محرك التصدير: Remotion (دعم كامل للعربية)
             🎙️ محرك الصوت: ${{ github.event.inputs.tts_engine }}
-            🎤 ترجمات بـ Whisper (TikTok style)
+            🎵 معالجة الصوت: AudioOptimizer (إزالة فراغات + تسريع + تطبيع)
+            🎤 الترجمات: Whisper (TikTok style word-by-word)
+            📝 السكربت: Viral Prompt Engine v3.0
             🔗 رقم التشغيل: #${{ github.run_number }}
             📅 التاريخ: ${{ steps.video_info.outputs.timestamp }}
           files: |
@@ -299,7 +340,7 @@ jobs:
       - name: 📋 Workflow Summary
         if: always()
         run: |
-          echo "## 🎬 ملخص التشغيل (Remotion + Gemini TTS)" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎬 ملخص التشغيل (Optimized Edition v2.1)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| الخاصية | القيمة |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
@@ -307,10 +348,13 @@ jobs:
           echo "| 🎭 النوع | ${{ github.event.inputs.content_type }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🎙️ محرك الصوت | ${{ github.event.inputs.tts_engine }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🎤 الصوت | ${{ github.event.inputs.tts_engine == 'gemini' && github.event.inputs.gemini_voice || github.event.inputs.voice }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⚡ سرعة الصوت | ${{ github.event.inputs.audio_speed }}x |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔇 إزالة الفراغات | ${{ github.event.inputs.remove_silence }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ⏱️ المدة | ${{ github.event.inputs.duration }}s |" >> $GITHUB_STEP_SUMMARY
           echo "| ✨ الجودة | ${{ github.event.inputs.quality }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🎬 المحرك | Remotion v4 |" >> $GITHUB_STEP_SUMMARY
           echo "| 🎤 الترجمات | Whisper (TikTok style) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📝 السكربت | Viral Engine v3.0 |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔢 رقم التشغيل | #${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ✅ الحالة | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
 
