@@ -1,23 +1,48 @@
-# --- AI & Text Generation ---
+# ════════════════════════════════════════════════════════════════════
+# 🎬 Viral AI Content Factory v2.0 - Remotion Edition
+# ════════════════════════════════════════════════════════════════════
+# 
+# ملاحظة مهمة:
+# بعد التحول لـ Remotion، تم حذف المكتبات التالية:
+#   ❌ arabic-reshaper  → Remotion يعالج العربية natively
+#   ❌ python-bidi      → Remotion يعالج RTL natively
+#   ❌ Pillow           → لا حاجة لرسم PNG للترجمات
+#   ❌ ffmpeg-python    → استبدل بـ subprocess
+#
+# Remotion يحتاج Node.js (مُثبّت منفصلاً، ليس من pip)
+# ════════════════════════════════════════════════════════════════════
+
+# ─── 🤖 AI & Text Generation ───────────────────────────────────────────
 google-generativeai>=0.7.0
 groq>=0.9.0
 
-# --- Text To Speech (Arabic) ---
+# ─── 🎙️ Text To Speech (Arabic) ────────────────────────────────────────
 edge-tts>=6.1.3
 elevenlabs>=1.2.0
 
-# --- Audio & Video Processing ---
+# ─── 🎵 Audio Processing ───────────────────────────────────────────────
 pydub>=0.25.1
-ffmpeg-python>=0.2.0
 yt-dlp>=2024.3.10
 
-# --- Arabic Text Rendering ---
-arabic-reshaper>=3.0.0
-python-bidi>=0.4.2
-Pillow>=10.3.0
-
-# --- Utilities ---
+# ─── 🌐 Network & API Calls ────────────────────────────────────────────
 requests>=2.31.0
+
+# ─── ⚙️ Utilities ──────────────────────────────────────────────────────
 python-dotenv>=1.0.1
 tqdm>=4.66.4
 colorama>=0.4.6
+
+# ════════════════════════════════════════════════════════════════════
+# 🚀 Remotion Setup (يُثبّت منفصلاً)
+# ════════════════════════════════════════════════════════════════════
+#
+# 1. ثبّت Node.js 18+ من: https://nodejs.org/
+#
+# 2. ثبّت Remotion:
+#    cd remotion
+#    npm install
+#
+# 3. اختبار:
+#    npx remotion studio
+#
+# ════════════════════════════════════════════════════════════════════
