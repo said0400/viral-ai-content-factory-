@@ -8,6 +8,8 @@
   ✓ Thumbnails متعددة (عبر FFmpeg المساعد)
   ✓ تحقق من حجم الملف
   ✓ تنظيف ذكي للملفات المؤقتة
+  ✓ 🆕 Verbose logging للتشخيص
+  ✓ 🆕 التحقق من الملفات قبل البدء
 
 ضع في: engine/render/remotion_renderer.py
 ═══════════════════════════════════════════════════════════════
@@ -29,7 +31,7 @@ logger = logging.getLogger(__name__)
 class RemotionRenderer:
     """محرك التصدير النهائي باستخدام Remotion."""
 
-    # ─── Presets الجودة (متطابق مع main.py) ──────────────────────
+    # ─── Presets الجودة ───────────────────────────────────────────
     QUALITY_PRESETS = {
         "medium": {
             "crf":          "23",
@@ -40,18 +42,18 @@ class RemotionRenderer:
         "high": {
             "crf":          "19",
             "jpeg_quality": "90",
-            "concurrency":  "4",
+            "concurrency":  "2",  # 🆕 خفّضت من 4 لأن GitHub Actions ضعيف
             "audio_bitrate": "192k",
         },
         "ultra": {
             "crf":          "17",
             "jpeg_quality": "95",
-            "concurrency":  "8",
+            "concurrency":  "4",  # 🆕 خفّضت من 8
             "audio_bitrate": "256k",
         },
     }
 
-    # ─── Legacy presets (للتوافق الرجعي) ─────────────────────────
+    # ─── Legacy presets ──────────────────────────────────────────
     LEGACY_PRESETS = {
         "tiktok":  "high",
         "reels":   "ultra",
@@ -67,7 +69,8 @@ class RemotionRenderer:
         "twitter":        512,
     }
 
-    DEFAULT_TIMEOUT = 1200  # 20 دقيقة (Remotion أبطأ من FFmpeg)
+    # 🆕 timeout أقصر (10 دقائق)
+    DEFAULT_TIMEOUT = 600
 
     # ════════════════════════════════════════════════════════════════
     def __init__(self):
@@ -89,7 +92,7 @@ class RemotionRenderer:
         # composition ID الافتراضي
         self.composition_id = os.getenv("REMOTION_COMPOSITION", "ShortsVideo")
 
-        # ملفات مساعدة (Thumbnails, video info)
+        # ملفات مساعدة
         self.utils = VideoUtils(width=self.w, height=self.h, fps=self.fps)
 
         # فحص Node.js و Remotion
@@ -147,29 +150,9 @@ class RemotionRenderer:
         quality: str = "high",
         composition_id: Optional[str] = None,
         metadata: Optional[Dict] = None,
-        preset: Optional[str] = None,  # legacy support
+        preset: Optional[str] = None,
     ) -> str:
-        """
-        التصدير النهائي للفيديو باستخدام Remotion.
-
-        Args:
-            props: البيانات التي ستُمرّر لـ Remotion
-                   مثال: {
-                       "title": "...",
-                       "subtitles": [...],
-                       "audioPath": "...",
-                       "backgroundPath": "...",
-                       ...
-                   }
-            output_path: مسار الفيديو الناتج
-            quality: medium / high / ultra
-            composition_id: اسم الـ Composition في Remotion
-            metadata: بيانات وصفية (تُضاف بعد التصدير عبر FFmpeg)
-            preset: legacy parameter (tiktok/reels/preview)
-
-        Returns:
-            مسار الفيديو النهائي
-        """
+        """التصدير النهائي للفيديو باستخدام Remotion."""
         # دعم Legacy
         if preset and quality == "high":
             quality = self.LEGACY_PRESETS.get(preset, "high")
@@ -186,11 +169,14 @@ class RemotionRenderer:
 
         logger.info(f"🚀 التصدير بـ Remotion [{quality}] | Composition: {comp_id}")
 
-        # 1) كتابة props إلى ملف JSON مؤقت
+        # 🆕 1) فحص Props قبل البدء
+        self._validate_props(props)
+
+        # 2) كتابة props إلى ملف JSON مؤقت
         props_file = self._write_props(props)
 
         try:
-            # 2) تشغيل Remotion render
+            # 3) تشغيل Remotion render
             self._run_remotion(
                 composition_id=comp_id,
                 output_path=output_path,
@@ -198,32 +184,98 @@ class RemotionRenderer:
                 cfg=cfg,
             )
 
-            # 3) إضافة Metadata (إذا وُجدت) عبر FFmpeg
+            # 4) إضافة Metadata
             if metadata:
                 self._add_metadata(output_path, metadata)
 
-            # 4) التحقق من الناتج
+            # 5) التحقق من الناتج
             if not Path(output_path).exists():
                 raise RuntimeError("❌ ملف الإخراج لم يُنشأ")
 
-            # 5) عرض المعلومات
+            # 6) عرض المعلومات
             self._print_output_info(output_path)
 
             return output_path
 
         finally:
-            # حذف ملف props المؤقت
-            try:
-                Path(props_file).unlink(missing_ok=True)
-            except Exception:
-                pass
+            # 🆕 لا نحذف props_file حتى نقدر نُشخّص الأخطاء
+            logger.info(f"📝 Props file kept for debugging: {props_file}")
+
+    # 🆕 فحص Props قبل البدء
+    def _validate_props(self, props: Dict) -> None:
+        """التحقق من صحة الـ props قبل إرسالها لـ Remotion."""
+        logger.info("🔍 Validating props...")
+
+        # 1) فحص الحقول الأساسية
+        required_fields = ["scenes", "totalDuration", "fps", "width", "height"]
+        for field in required_fields:
+            if field not in props:
+                raise ValueError(f"❌ Missing required field: {field}")
+
+        # 2) فحص المشاهد
+        scenes = props.get("scenes", [])
+        if not scenes:
+            raise ValueError("❌ No scenes provided!")
+
+        logger.info(f"   ✓ {len(scenes)} scenes")
+
+        # 3) فحص ملفات الفيديو لكل مشهد
+        missing_videos = []
+        for i, scene in enumerate(scenes):
+            bg_path = scene.get("backgroundPath", "")
+            if bg_path:
+                if not Path(bg_path).exists():
+                    missing_videos.append((i, bg_path))
+                    logger.warning(f"   ⚠ Scene {i} video not found: {bg_path}")
+                else:
+                    size_kb = Path(bg_path).stat().st_size / 1024
+                    logger.info(f"   ✓ Scene {i} video: {size_kb:.1f} KB")
+            else:
+                logger.warning(f"   ⚠ Scene {i} has no background video!")
+
+        if missing_videos and len(missing_videos) == len(scenes):
+            raise RuntimeError(
+                f"❌ All {len(scenes)} background videos are missing!\n"
+                f"   تأكد من PEXELS_API_KEY و PIXABAY_API_KEY"
+            )
+
+        # 4) فحص ملف الصوت
+        audio_path = props.get("audioPath", "")
+        if audio_path:
+            if not Path(audio_path).exists():
+                raise FileNotFoundError(
+                    f"❌ Audio file not found: {audio_path}"
+                )
+            audio_size_kb = Path(audio_path).stat().st_size / 1024
+            logger.info(f"   ✓ Audio: {audio_size_kb:.1f} KB ({audio_path})")
+        else:
+            logger.warning("   ⚠ No audio path provided")
+
+        # 5) فحص الترجمات
+        subtitles = props.get("subtitles", [])
+        logger.info(f"   ✓ {len(subtitles)} subtitles")
+
+        # 6) فحص المدة
+        duration = props.get("totalDuration", 0)
+        if duration <= 0:
+            raise ValueError(f"❌ Invalid duration: {duration}")
+
+        logger.info(f"   ✓ Duration: {duration}s")
+        logger.info(f"   ✓ Dimensions: {props.get('width')}x{props.get('height')}")
+        logger.info(f"   ✓ FPS: {props.get('fps')}")
+        logger.info("✅ Props validation passed!")
 
     def _write_props(self, props: Dict) -> str:
         """كتابة props إلى ملف JSON مؤقت."""
         props_file = self.temp_dir / "remotion_props.json"
+
         with open(props_file, "w", encoding="utf-8") as f:
             json.dump(props, f, ensure_ascii=False, indent=2)
-        logger.debug(f"📝 Props written to: {props_file}")
+
+        # 🆕 معلومات تشخيصية
+        file_size_kb = props_file.stat().st_size / 1024
+        logger.info(f"📝 Props written: {props_file} ({file_size_kb:.1f} KB)")
+
         return str(props_file)
 
     def _run_remotion(
@@ -233,7 +285,7 @@ class RemotionRenderer:
         props_file: str,
         cfg: dict,
     ) -> None:
-        """تشغيل أمر Remotion render."""
+        """تشغيل أمر Remotion render مع verbose logging."""
         cmd = [
             "npx", "remotion", "render",
             "src/index.ts",
@@ -245,26 +297,51 @@ class RemotionRenderer:
             "--crf", cfg["crf"],
             "--codec", "h264",
             "--pixel-format", "yuv420p",
-            "--log", "error",
+            # 🆕 verbose logging
+            "--log", "verbose",
+            # 🆕 تعطيل المعاينة في headless
+            "--browser-executable", "",
+            # 🆕 timeout للـ delayRender (مهم جداً!)
+            "--timeout", "30000",
         ]
 
-        logger.info(f"   ⏳ Rendering... (timeout: {self.DEFAULT_TIMEOUT}s)")
+        logger.info("=" * 60)
+        logger.info(f"🎬 Running Remotion render...")
+        logger.info(f"   ⏱ Timeout: {self.DEFAULT_TIMEOUT}s")
+        logger.info(f"   📋 Composition: {composition_id}")
+        logger.info(f"   📁 Working dir: {self.remotion_dir}")
+        logger.info(f"   📄 Props file: {props_file}")
+        logger.info(f"   📤 Output: {output_path}")
+        logger.info(f"   ⚙️ Concurrency: {cfg['concurrency']}")
+        logger.info(f"   ⚙️ CRF: {cfg['crf']}")
+        logger.info("=" * 60)
 
         try:
+            # 🆕 طباعة الـ stdout/stderr مباشرة (live)
             result = subprocess.run(
                 cmd,
                 cwd=str(self.remotion_dir),
-                capture_output=True,
-                text=True,
                 timeout=self.DEFAULT_TIMEOUT,
+                # ❌ لا نستخدم capture_output لنرى الـ output مباشرة
             )
 
             if result.returncode != 0:
-                err = (result.stderr or result.stdout)[:1000]
-                raise RuntimeError(f"❌ فشل Remotion render:\n{err}")
+                raise RuntimeError(
+                    f"❌ Remotion failed (exit code: {result.returncode})\n"
+                    f"   تفقّد الـ logs أعلاه لتعرف السبب"
+                )
+
+            logger.info("✅ Remotion render completed!")
 
         except subprocess.TimeoutExpired:
-            raise RuntimeError(f"❌ Remotion تجاوز الوقت ({self.DEFAULT_TIMEOUT}s)")
+            raise RuntimeError(
+                f"❌ Remotion timeout ({self.DEFAULT_TIMEOUT}s)!\n"
+                f"   الأسباب المحتملة:\n"
+                f"     1. ملفات الفيديو/الصوت تالفة أو غير موجودة\n"
+                f"     2. الـ Composition يحتوي infinite loop\n"
+                f"     3. delayRender() لم يستدعي continueRender()\n"
+                f"     4. حجم الـ rendering كبير جداً"
+            )
 
     def _add_metadata(self, video_path: str, metadata: Dict) -> None:
         """إضافة metadata بعد التصدير عبر FFmpeg."""
@@ -279,13 +356,11 @@ class RemotionRenderer:
             "-c", "copy",
         ]
 
-        # إضافة metadata
         cmd.extend(self._build_metadata_args(metadata))
         cmd.append(temp_output)
 
         try:
             subprocess.run(cmd, check=True, capture_output=True, timeout=120)
-            # استبدال الملف الأصلي
             shutil.move(temp_output, video_path)
             logger.info("✓ Metadata added")
         except Exception as e:
@@ -343,7 +418,7 @@ class RemotionRenderer:
                 )
 
     # ════════════════════════════════════════════════════════════════
-    #                    Thumbnails (عبر FFmpeg)
+    #                    Thumbnails
     # ════════════════════════════════════════════════════════════════
     def create_thumbnail(
         self,
@@ -352,7 +427,6 @@ class RemotionRenderer:
         timestamp: float = 1.5,
         resize: bool = True,
     ) -> str:
-        """إنشاء thumbnail (يستخدم FFmpeg لأنه أسرع)."""
         return self.utils.create_thumbnail(video, output, timestamp, resize)
 
     def create_multiple_thumbnails(
@@ -361,7 +435,6 @@ class RemotionRenderer:
         output_dir: str,
         count: int = 3,
     ) -> List[str]:
-        """إنشاء عدة thumbnails."""
         return self.utils.create_multiple_thumbnails(video, output_dir, count)
 
     # ════════════════════════════════════════════════════════════════
@@ -431,10 +504,6 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("Usage: python remotion_renderer.py <command> [args]")
-        print("Commands:")
-        print("  info <video.mp4>")
-        print("  thumbnail <video.mp4>")
-        print("  validate <video.mp4>")
         sys.exit(1)
 
     renderer = RemotionRenderer()
