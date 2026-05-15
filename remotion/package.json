@@ -1,0 +1,40 @@
+{
+  "name": "viral-ai-content-factory-remotion",
+  "version": "2.0.0",
+  "description": "Remotion video renderer for viral AI content factory (Arabic Shorts)",
+  "private": true,
+  "scripts": {
+    "start": "npx remotion studio",
+    "studio": "npx remotion studio",
+    "render": "npx remotion render src/index.ts ShortsVideo out/video.mp4",
+    "render:json": "npx remotion render src/index.ts ShortsVideo out/video.mp4 --props=props.json",
+    "build": "npx remotion bundle",
+    "upgrade": "npx remotion upgrade",
+    "lint": "npx tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "@remotion/media-utils": "^4.0.0",
+    "@remotion/transitions": "^4.0.0",
+    "@remotion/google-fonts": "^4.0.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "remotion",
+    "arabic",
+    "video",
+    "shorts",
+    "ai",
+    "react"
+  ]
+}
