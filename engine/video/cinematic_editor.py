@@ -1,12 +1,13 @@
 """
-🎬 Cinematic Editor — مُجهّز البيانات لـ Remotion
+🎬 Cinematic Editor — مُجهّز البيانات لـ Remotion (مع Whisper)
 ═══════════════════════════════════════════════════════════════
-بعد التحول لـ Remotion، أصبح هذا الملف مسؤولاً عن:
+بعد التحول لـ Remotion + Whisper، أصبح هذا الملف مسؤولاً عن:
   • جلب الفيديوهات من Pexels + Pixabay
   • اختيار الكلمات المفتاحية الذكية (50+ keyword + visual_prompt)
   • بناء JSON props كامل لـ Remotion
   • تجهيز التايملاين (Timeline) للمشاهد
-  • 🆕 مزامنة المشاهد مع مدة الصوت تلقائياً
+  • مزامنة المشاهد مع مدة الصوت تلقائياً
+  • 🆕 استخراج توقيتات الكلمات بـ Whisper (TikTok style)
 
 ضع في: engine/video/cinematic_editor.py
 ═══════════════════════════════════════════════════════════════
@@ -147,6 +148,11 @@ class CinematicEditor:
         self.pexels_key = os.getenv("PEXELS_API_KEY", "")
         self.pixabay_key = os.getenv("PIXABAY_API_KEY", "")
 
+        # 🆕 إعدادات Whisper
+        self.use_whisper = os.getenv("USE_WHISPER", "true").lower() == "true"
+        self.whisper_max_words = int(os.getenv("WHISPER_MAX_WORDS", "4"))
+        self.whisper_max_duration = float(os.getenv("WHISPER_MAX_DURATION", "2.5"))
+
         # المسارات
         self.temp_dir = Path(os.getenv("TEMP_DIR", "./temp"))
         self.footage_dir = self.temp_dir / "footage"
@@ -158,6 +164,7 @@ class CinematicEditor:
         logger.info(
             f"🎬 CinematicEditor (Remotion mode) | {self.w}x{self.h}@{self.fps}fps"
         )
+        logger.info(f"   🎤 Whisper: {'✓ enabled' if self.use_whisper else '✗ disabled'}")
 
     def _clear_old_footage(self) -> None:
         """مسح footage القديم لضمان تنويع الفيديوهات."""
@@ -176,7 +183,7 @@ class CinematicEditor:
             logger.warning(f"⚠ فشل المسح: {e}")
 
     # ════════════════════════════════════════════════════════════════
-    #                    🆕 الدالة الرئيسية الجديدة
+    #                    🆕 الدالة الرئيسية
     # ════════════════════════════════════════════════════════════════
     def build_props_for_remotion(
         self,
@@ -186,7 +193,7 @@ class CinematicEditor:
     ) -> dict:
         """
         🆕 بناء JSON props كامل لـ Remotion.
-        مع مزامنة تلقائية للمشاهد مع مدة الصوت.
+        مع مزامنة دقيقة بـ Whisper (TikTok style).
         """
         scenes = script.get("scenes", [])
         total_dur = float(script.get("duration_estimate", 45.0))
@@ -196,22 +203,31 @@ class CinematicEditor:
 
         logger.info(f"🎬 تجهيز Remotion props | {len(scenes)} مشهد | {total_dur:.1f}s")
 
-        # 🆕 1️⃣ مزامنة توقيتات المشاهد مع مدة الصوت
+        # 🆕 1️⃣ استخدام Whisper لاستخراج توقيتات دقيقة من الصوت
+        whisper_subtitles = []
+        if self.use_whisper and audio_path:
+            whisper_subtitles = self._get_whisper_subtitles(audio_path)
+
+        # 2️⃣ مزامنة توقيتات المشاهد مع مدة الصوت (للخلفيات فقط)
         self._sync_scenes_to_audio(scenes, total_dur)
 
-        # 2️⃣ جلب الفيديوهات
+        # 3️⃣ جلب الفيديوهات
         logger.info("► جلب الفيديوهات...")
         raws = self._fetch_footage(scenes)
 
-        # 3️⃣ بناء بيانات المشاهد
+        # 4️⃣ بناء بيانات المشاهد
         logger.info("► بناء بيانات المشاهد...")
         scenes_data = self._build_scenes_data(scenes, raws)
 
-        # 4️⃣ بناء بيانات الترجمات (مزامنة مع المشاهد)
-        logger.info("► بناء بيانات الترجمات...")
-        subtitles_data = self._build_subtitles_data(subtitle_data, scenes)
+        # 5️⃣ بناء بيانات الترجمات
+        if whisper_subtitles:
+            logger.info(f"✅ استخدام Whisper subtitles: {len(whisper_subtitles)} مجموعة")
+            subtitles_data = whisper_subtitles
+        else:
+            logger.info("► بناء الترجمات من المشاهد (fallback)...")
+            subtitles_data = self._build_subtitles_from_scenes(scenes)
 
-        # 5️⃣ تجهيز الـ props النهائية
+        # 6️⃣ تجهيز الـ props النهائية
         props = {
             # المعلومات العامة
             "title": script.get("title", ""),
@@ -238,29 +254,64 @@ class CinematicEditor:
                 "backgroundOverlay": "rgba(0,0,0,0.35)",
                 "letterboxEnabled": True,
                 "cinematicGrade": True,
+                "subtitleMode": "tiktok" if whisper_subtitles else "scene",
             },
         }
 
         logger.info(f"✓ Remotion props جاهز | {len(scenes_data)} مشهد | {len(subtitles_data)} ترجمة")
         return props
 
-    # 🆕🆕🆕 دالة جديدة: مزامنة المشاهد مع مدة الصوت 🆕🆕🆕
+    # 🆕🆕🆕 دالة جديدة: استخدام Whisper 🆕🆕🆕
+    def _get_whisper_subtitles(self, audio_path: str) -> List[Dict]:
+        """
+        🆕 استخراج ترجمات دقيقة من الصوت باستخدام Whisper.
+        
+        Returns:
+            قائمة المجموعات (TikTok style) أو [] عند الفشل
+        """
+        if not audio_path or not Path(audio_path).exists():
+            logger.warning("⚠ ملف الصوت غير موجود لـ Whisper")
+            return []
+
+        try:
+            from engine.voice.whisper_transcriber import WhisperTranscriber
+
+            logger.info("🎤 تحليل الصوت بـ Whisper...")
+            transcriber = WhisperTranscriber()
+
+            subtitles = transcriber.transcribe_to_subtitles(
+                audio_path=audio_path,
+                max_words_per_chunk=self.whisper_max_words,
+                max_chunk_duration=self.whisper_max_duration,
+            )
+
+            if subtitles:
+                # إضافة sceneId للتوافق
+                for i, sub in enumerate(subtitles):
+                    sub["sceneId"] = i
+
+                logger.info(f"✅ Whisper: {len(subtitles)} مجموعة كلمات")
+                return subtitles
+            else:
+                logger.warning("⚠ Whisper لم يُرجع أي ترجمات")
+                return []
+
+        except ImportError as e:
+            logger.warning(f"⚠ Whisper غير مثبت: {e}")
+            logger.warning("   شغّل: pip install faster-whisper")
+            return []
+        except Exception as e:
+            logger.error(f"❌ فشل Whisper: {e}")
+            return []
+
+    # 🆕 دالة: مزامنة المشاهد مع مدة الصوت
     def _sync_scenes_to_audio(self, scenes: list, target_duration: float) -> None:
         """
         🆕 إعادة توزيع توقيتات المشاهد لتطابق مدة الصوت الفعلية.
-        
-        تعدّل المشاهد in-place بحيث:
-          - مجموع كل المشاهد = مدة الصوت
-          - النسب بين المشاهد محفوظة
-        
-        Args:
-            scenes: قائمة المشاهد (تُعدّل مباشرة)
-            target_duration: المدة المستهدفة (بالثواني)
         """
         if not scenes:
             return
 
-        # حساب المدة الإجمالية الحالية
         current_total = sum(
             float(s.get("duration", 3.0)) + float(s.get("pause_after", 0.3))
             for s in scenes
@@ -270,7 +321,6 @@ class CinematicEditor:
             logger.warning("⚠ مجموع المدد صفر، تخطي المزامنة")
             return
 
-        # حساب نسبة التعديل
         scale_factor = target_duration / current_total
 
         logger.info(
@@ -278,28 +328,24 @@ class CinematicEditor:
             f"(scale: {scale_factor:.2f}x)"
         )
 
-        # تعديل كل مشهد بالنسبة
         for scene in scenes:
             old_duration = float(scene.get("duration", 3.0))
             old_pause = float(scene.get("pause_after", 0.3))
-            
-            # الحفاظ على نسبة الـ pause إلى الـ duration
+
             new_duration = round(old_duration * scale_factor, 2)
             new_pause = round(old_pause * scale_factor, 2)
-            
-            # حد أدنى للمدة (لتجنب مشاهد قصيرة جداً)
+
             new_duration = max(new_duration, 1.0)
             new_pause = max(new_pause, 0.1)
-            
+
             scene["duration"] = new_duration
             scene["pause_after"] = new_pause
 
-        # التحقق من الإجمالي الجديد
         new_total = sum(
             float(s.get("duration", 3.0)) + float(s.get("pause_after", 0.3))
             for s in scenes
         )
-        
+
         logger.info(f"✓ مدة المشاهد الجديدة: {new_total:.1f}s")
 
     def _build_scenes_data(self, scenes: list, raws: list) -> List[dict]:
@@ -312,17 +358,13 @@ class CinematicEditor:
             duration = float(scene.get("duration", 3.0))
             pause_after = float(scene.get("pause_after", 0.3))
 
-            # التأثيرات
             zoom_effect = self.ZOOM_MAP.get(scene_type, "slow_zoom_in")
             available_trans = self.SCENE_TRANSITIONS.get(
                 scene_type, ["cross_dissolve"]
             )
             transition = random.choice(available_trans) if i > 0 else "none"
-
-            # Shake للمشاهد المهمة
             shake = scene_type in ("hook", "peak")
 
-            # المسار المطلق للفيديو
             background_path = ""
             if i < len(raws) and raws[i]:
                 background_path = str(Path(raws[i]).resolve())
@@ -348,38 +390,8 @@ class CinematicEditor:
 
         return scenes_data
 
-    def _build_subtitles_data(
-        self,
-        sub_data: list,
-        scenes: list,
-    ) -> List[dict]:
-        """
-        🆕 بناء بيانات الترجمات كـ JSON لـ Remotion.
-        تستخدم توقيتات المشاهد المُحدّثة بعد المزامنة.
-
-        يدعم نوعين من المدخلات:
-        1. القديم: [(png_path, scene_dict), ...]
-        2. الجديد: [{"text": "...", "start": 0.0, "end": 3.0}, ...]
-        3. 🆕 إذا فارغ: نبني من المشاهد مباشرة
-        """
-        # 🆕 إذا لم توجد ترجمات، نبنيها من المشاهد (الأفضل)
-        if not sub_data:
-            logger.info("ℹ بناء الترجمات من المشاهد المُحدّثة...")
-            return self._build_subtitles_from_scenes(scenes)
-
-        # 🆕 دائماً نُعيد بناء الترجمات من المشاهد لضمان المزامنة
-        # (المشاهد تم تحديث توقيتاتها بـ _sync_scenes_to_audio)
-        logger.info("ℹ إعادة بناء الترجمات لضمان المزامنة...")
-        return self._build_subtitles_from_scenes(scenes)
-
-    # 🆕🆕🆕 دالة جديدة: بناء الترجمات من المشاهد 🆕🆕🆕
     def _build_subtitles_from_scenes(self, scenes: list) -> List[dict]:
-        """
-        🆕 بناء بيانات الترجمات مباشرة من المشاهد (بعد المزامنة).
-        
-        هذا يضمن أن الترجمات تتطابق تماماً مع توقيتات المشاهد
-        وبالتالي مع الصوت.
-        """
+        """بناء بيانات الترجمات مباشرة من المشاهد (fallback)."""
         subtitles = []
         cumulative_time = 0.0
 
@@ -400,7 +412,7 @@ class CinematicEditor:
 
             cumulative_time += duration + pause
 
-        logger.info(f"✓ تم بناء {len(subtitles)} ترجمة مزامنة مع المشاهد")
+        logger.info(f"✓ تم بناء {len(subtitles)} ترجمة (scene mode)")
         return subtitles
 
     # ════════════════════════════════════════════════════════════════
@@ -413,14 +425,14 @@ class CinematicEditor:
         subtitle_data: list,
         output_path: str,
     ) -> str:
-        """⚠️ DEPRECATED: استخدم build_props_for_remotion() بدلاً منها."""
+        """⚠️ DEPRECATED."""
         raise DeprecationWarning(
             "❌ build_video() لم تعد مدعومة!\n"
             "   استخدم: build_props_for_remotion() ثم RemotionRenderer.render_final()"
         )
 
     # ════════════════════════════════════════════════════════════════
-    #                    جلب الفيديوهات (احتُفظ به)
+    #                    جلب الفيديوهات
     # ════════════════════════════════════════════════════════════════
     def _fetch_footage(self, scenes: list) -> list:
         """جلب فيديوهات لكل مشهد."""
@@ -439,12 +451,10 @@ class CinematicEditor:
 
     def _pick_kw(self, scene: dict, used: set) -> str:
         """اختيار كلمة بحث ذكية للمشهد."""
-        # 1. visual_prompt من AI (أولوية عالية)
         vp = scene.get("visual_prompt", "").strip()
         if vp and len(vp) > 5 and vp not in used:
             return vp
 
-        # 2. ARABIC_HINTS
         text = scene.get("text", "")
         for hint, kw_list in self.ARABIC_HINTS.items():
             if hint in text:
@@ -452,12 +462,10 @@ class CinematicEditor:
                     if kw not in used:
                         return kw
 
-        # 3. KEYWORDS عشوائية
         avail = [k for k in self.KEYWORDS if k not in used]
         if avail:
             return random.choice(avail)
 
-        # 4. أي كلمة (لو استُنفد كل شيء)
         return random.choice(self.KEYWORDS)
 
     def _download(self, keyword: str, idx: int, used_urls: set) -> str:
@@ -465,19 +473,16 @@ class CinematicEditor:
         ts = int(time.time() * 1000) % 100000
         out = str(self.footage_dir / f"footage_{idx:03d}_{ts}.mp4")
 
-        # 1️⃣ جرب Pexels أولاً
         if self.pexels_key:
             result = self._download_from_pexels(keyword, out, used_urls)
             if result:
                 return result
 
-        # 2️⃣ Pixabay كـ fallback
         if self.pixabay_key:
             result = self._download_from_pixabay(keyword, out, used_urls)
             if result:
                 return result
 
-        # 3️⃣ Placeholder
         logger.warning(f"⚠ لم يتم العثور على فيديو لـ '{keyword}' → placeholder")
         return self._placeholder(idx)
 
@@ -525,7 +530,6 @@ class CinematicEditor:
             if not videos:
                 return None
 
-            # فلترة portrait
             portrait_videos = [
                 v for v in videos
                 if any(
@@ -621,23 +625,20 @@ class CinematicEditor:
 
     def _best_file(self, files: list) -> Optional[dict]:
         """اختيار أفضل ملف فيديو."""
-        # portrait + HD
         for vf in files:
             if (vf.get("height", 0) >= vf.get("width", 1)
                     and vf.get("quality") in ("hd", "sd")):
                 return vf
-        # أي portrait
         for vf in files:
             if vf.get("height", 0) >= vf.get("width", 1):
                 return vf
-        # أي HD
         for vf in files:
             if vf.get("quality") in ("hd", "sd"):
                 return vf
         return files[0] if files else None
 
     def _placeholder(self, idx: int) -> str:
-        """توليد فيديو خلفية بسيط (placeholder) باستخدام FFmpeg."""
+        """توليد فيديو خلفية بسيط (placeholder)."""
         out = str(self.footage_dir / f"ph_{idx:03d}.mp4")
         colors = ["0x0a0a1a", "0x0d0d1e", "0x080818", "0x0a0a0a", "0x05050f"]
         c = colors[idx % len(colors)]
@@ -693,9 +694,10 @@ class CinematicEditor:
 # ════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     editor = CinematicEditor()
-    print(f"✓ CinematicEditor (Remotion mode) جاهز")
+    print(f"✓ CinematicEditor (Remotion + Whisper mode) جاهز")
     print(f"  Dimensions: {editor.w}x{editor.h}")
     print(f"  FPS: {editor.fps}")
     print(f"  Quality: {editor.quality}")
+    print(f"  Whisper: {'✓' if editor.use_whisper else '✗'}")
     print(f"  Pexels: {'✓' if editor.pexels_key else '✗'}")
     print(f"  Pixabay: {'✓' if editor.pixabay_key else '✗'}")
