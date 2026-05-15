@@ -2,6 +2,7 @@
  * 🎵 Audio Track Component
  * ═══════════════════════════════════════════════════════════════
  * تشغيل الصوت في الفيديو مع Fade In/Out تلقائي
+ * يستخدم staticFile() لتحميل الصوت من public/
  * ═══════════════════════════════════════════════════════════════
  */
 
@@ -11,6 +12,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
   interpolate,
+  staticFile,
 } from "remotion";
 import { AudioTrackProps } from "../types";
 
@@ -27,6 +29,11 @@ export const AudioTrack: React.FC<AudioTrackProps> = ({
     console.warn("⚠ AudioTrack: No audio source provided");
     return null;
   }
+
+  // 🆕 استخدام staticFile() لتحويل المسار النسبي
+  const audioSrc = src.startsWith("http") || src.startsWith("file://")
+    ? src
+    : staticFile(src);
 
   // Fade In (أول 0.5 ثانية)
   const fadeInFrames = Math.floor(0.5 * fps);
@@ -51,7 +58,7 @@ export const AudioTrack: React.FC<AudioTrackProps> = ({
 
   return (
     <Audio
-      src={src}
+      src={audioSrc}
       volume={finalVolume}
       startFrom={startFrom}
       endAt={endAt}
