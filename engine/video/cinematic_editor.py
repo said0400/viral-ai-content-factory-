@@ -6,15 +6,7 @@
   • اختيار الكلمات المفتاحية الذكية (50+ keyword + visual_prompt)
   • بناء JSON props كامل لـ Remotion
   • تجهيز التايملاين (Timeline) للمشاهد
-
-التغييرات الكبيرة:
-  ❌ حُذف: معالجة الـ clips بـ FFmpeg (zoom, shake, transitions)
-  ❌ حُذف: PNG overlays للترجمة
-  ❌ حُذف: التدرج اللوني والـ letterbox
-  ❌ حُذف: دمج الصوت
-  ✅ أُضيف: تجهيز JSON لـ Remotion
-  ✅ احتُفظ: جلب الفيديوهات (Pexels + Pixabay)
-  ✅ احتُفظ: ARABIC_HINTS الذكية
+  • 🆕 مزامنة المشاهد مع مدة الصوت تلقائياً
 
 ضع في: engine/video/cinematic_editor.py
 ═══════════════════════════════════════════════════════════════
@@ -194,45 +186,7 @@ class CinematicEditor:
     ) -> dict:
         """
         🆕 بناء JSON props كامل لـ Remotion.
-
-        هذه هي الدالة الرئيسية الجديدة بدلاً من build_video().
-
-        Args:
-            script: سكربت AI {scenes, duration_estimate, ...}
-            audio_path: مسار ملف الصوت
-            subtitle_data: قائمة الترجمات [(png_path, scene), ...]
-                          أو [{text, start, end}, ...]
-
-        Returns:
-            dict يحتوي كل ما يحتاجه Remotion:
-            {
-                "title": "...",
-                "audioPath": "...",
-                "totalDuration": 45.0,
-                "fps": 30,
-                "width": 1080,
-                "height": 1920,
-                "scenes": [
-                    {
-                        "id": 0,
-                        "type": "hook",
-                        "text": "...",
-                        "duration": 3.5,
-                        "pauseAfter": 0.3,
-                        "startTime": 0.0,
-                        "endTime": 3.5,
-                        "backgroundPath": "/abs/path/footage_000.mp4",
-                        "zoomEffect": "punch_zoom",
-                        "transitionIn": "flash_black",
-                        "shake": true
-                    },
-                    ...
-                ],
-                "subtitles": [
-                    {"text": "...", "start": 0.0, "end": 3.5},
-                    ...
-                ]
-            }
+        مع مزامنة تلقائية للمشاهد مع مدة الصوت.
         """
         scenes = script.get("scenes", [])
         total_dur = float(script.get("duration_estimate", 45.0))
@@ -242,19 +196,22 @@ class CinematicEditor:
 
         logger.info(f"🎬 تجهيز Remotion props | {len(scenes)} مشهد | {total_dur:.1f}s")
 
-        # 1️⃣ جلب الفيديوهات
+        # 🆕 1️⃣ مزامنة توقيتات المشاهد مع مدة الصوت
+        self._sync_scenes_to_audio(scenes, total_dur)
+
+        # 2️⃣ جلب الفيديوهات
         logger.info("► جلب الفيديوهات...")
         raws = self._fetch_footage(scenes)
 
-        # 2️⃣ بناء بيانات المشاهد
+        # 3️⃣ بناء بيانات المشاهد
         logger.info("► بناء بيانات المشاهد...")
         scenes_data = self._build_scenes_data(scenes, raws)
 
-        # 3️⃣ بناء بيانات الترجمات
+        # 4️⃣ بناء بيانات الترجمات (مزامنة مع المشاهد)
         logger.info("► بناء بيانات الترجمات...")
         subtitles_data = self._build_subtitles_data(subtitle_data, scenes)
 
-        # 4️⃣ تجهيز الـ props النهائية
+        # 5️⃣ تجهيز الـ props النهائية
         props = {
             # المعلومات العامة
             "title": script.get("title", ""),
@@ -286,6 +243,64 @@ class CinematicEditor:
 
         logger.info(f"✓ Remotion props جاهز | {len(scenes_data)} مشهد | {len(subtitles_data)} ترجمة")
         return props
+
+    # 🆕🆕🆕 دالة جديدة: مزامنة المشاهد مع مدة الصوت 🆕🆕🆕
+    def _sync_scenes_to_audio(self, scenes: list, target_duration: float) -> None:
+        """
+        🆕 إعادة توزيع توقيتات المشاهد لتطابق مدة الصوت الفعلية.
+        
+        تعدّل المشاهد in-place بحيث:
+          - مجموع كل المشاهد = مدة الصوت
+          - النسب بين المشاهد محفوظة
+        
+        Args:
+            scenes: قائمة المشاهد (تُعدّل مباشرة)
+            target_duration: المدة المستهدفة (بالثواني)
+        """
+        if not scenes:
+            return
+
+        # حساب المدة الإجمالية الحالية
+        current_total = sum(
+            float(s.get("duration", 3.0)) + float(s.get("pause_after", 0.3))
+            for s in scenes
+        )
+
+        if current_total <= 0:
+            logger.warning("⚠ مجموع المدد صفر، تخطي المزامنة")
+            return
+
+        # حساب نسبة التعديل
+        scale_factor = target_duration / current_total
+
+        logger.info(
+            f"🎯 مزامنة المشاهد: {current_total:.1f}s → {target_duration:.1f}s "
+            f"(scale: {scale_factor:.2f}x)"
+        )
+
+        # تعديل كل مشهد بالنسبة
+        for scene in scenes:
+            old_duration = float(scene.get("duration", 3.0))
+            old_pause = float(scene.get("pause_after", 0.3))
+            
+            # الحفاظ على نسبة الـ pause إلى الـ duration
+            new_duration = round(old_duration * scale_factor, 2)
+            new_pause = round(old_pause * scale_factor, 2)
+            
+            # حد أدنى للمدة (لتجنب مشاهد قصيرة جداً)
+            new_duration = max(new_duration, 1.0)
+            new_pause = max(new_pause, 0.1)
+            
+            scene["duration"] = new_duration
+            scene["pause_after"] = new_pause
+
+        # التحقق من الإجمالي الجديد
+        new_total = sum(
+            float(s.get("duration", 3.0)) + float(s.get("pause_after", 0.3))
+            for s in scenes
+        )
+        
+        logger.info(f"✓ مدة المشاهد الجديدة: {new_total:.1f}s")
 
     def _build_scenes_data(self, scenes: list, raws: list) -> List[dict]:
         """بناء بيانات المشاهد كـ JSON."""
@@ -339,44 +354,53 @@ class CinematicEditor:
         scenes: list,
     ) -> List[dict]:
         """
-        بناء بيانات الترجمات كـ JSON لـ Remotion.
+        🆕 بناء بيانات الترجمات كـ JSON لـ Remotion.
+        تستخدم توقيتات المشاهد المُحدّثة بعد المزامنة.
 
         يدعم نوعين من المدخلات:
         1. القديم: [(png_path, scene_dict), ...]
         2. الجديد: [{"text": "...", "start": 0.0, "end": 3.0}, ...]
+        3. 🆕 إذا فارغ: نبني من المشاهد مباشرة
         """
+        # 🆕 إذا لم توجد ترجمات، نبنيها من المشاهد (الأفضل)
         if not sub_data:
-            logger.warning("⚠ لا توجد بيانات ترجمة")
-            return []
+            logger.info("ℹ بناء الترجمات من المشاهد المُحدّثة...")
+            return self._build_subtitles_from_scenes(scenes)
 
+        # 🆕 دائماً نُعيد بناء الترجمات من المشاهد لضمان المزامنة
+        # (المشاهد تم تحديث توقيتاتها بـ _sync_scenes_to_audio)
+        logger.info("ℹ إعادة بناء الترجمات لضمان المزامنة...")
+        return self._build_subtitles_from_scenes(scenes)
+
+    # 🆕🆕🆕 دالة جديدة: بناء الترجمات من المشاهد 🆕🆕🆕
+    def _build_subtitles_from_scenes(self, scenes: list) -> List[dict]:
+        """
+        🆕 بناء بيانات الترجمات مباشرة من المشاهد (بعد المزامنة).
+        
+        هذا يضمن أن الترجمات تتطابق تماماً مع توقيتات المشاهد
+        وبالتالي مع الصوت.
+        """
         subtitles = []
         cumulative_time = 0.0
 
-        for i, item in enumerate(sub_data):
-            # التعامل مع التنسيق القديم (tuple)
-            if isinstance(item, tuple) and len(item) >= 2:
-                _, scene = item[0], item[1]
-                text = scene.get("text", "")
-                duration = float(scene.get("duration", 3.0))
-                pause = float(scene.get("pause_after", 0.3))
+        for i, scene in enumerate(scenes):
+            text = scene.get("text", "").strip()
+            duration = float(scene.get("duration", 3.0))
+            pause = float(scene.get("pause_after", 0.3))
 
+            if text:
                 subtitles.append({
                     "id": i,
                     "text": text,
                     "start": round(cumulative_time, 3),
                     "end": round(cumulative_time + duration, 3),
-                })
-                cumulative_time += duration + pause
-
-            # التعامل مع التنسيق الجديد (dict)
-            elif isinstance(item, dict):
-                subtitles.append({
-                    "id": i,
-                    "text": item.get("text", ""),
-                    "start": round(float(item.get("start", 0)), 3),
-                    "end": round(float(item.get("end", 0)), 3),
+                    "duration": round(duration, 3),
+                    "sceneId": i,
                 })
 
+            cumulative_time += duration + pause
+
+        logger.info(f"✓ تم بناء {len(subtitles)} ترجمة مزامنة مع المشاهد")
         return subtitles
 
     # ════════════════════════════════════════════════════════════════
@@ -389,20 +413,10 @@ class CinematicEditor:
         subtitle_data: list,
         output_path: str,
     ) -> str:
-        """
-        ⚠️ DEPRECATED: استخدم build_props_for_remotion() بدلاً منها.
-
-        هذه الدالة لم تعد تعمل لأن المشروع تحوّل لـ Remotion.
-        """
+        """⚠️ DEPRECATED: استخدم build_props_for_remotion() بدلاً منها."""
         raise DeprecationWarning(
             "❌ build_video() لم تعد مدعومة!\n"
-            "   استخدم: build_props_for_remotion() ثم RemotionRenderer.render_final()\n"
-            "\n"
-            "   مثال:\n"
-            "   editor = CinematicEditor()\n"
-            "   props = editor.build_props_for_remotion(script, audio, subs)\n"
-            "   renderer = RemotionRenderer()\n"
-            "   renderer.render_final(props, output_path)"
+            "   استخدم: build_props_for_remotion() ثم RemotionRenderer.render_final()"
         )
 
     # ════════════════════════════════════════════════════════════════
@@ -685,28 +699,3 @@ if __name__ == "__main__":
     print(f"  Quality: {editor.quality}")
     print(f"  Pexels: {'✓' if editor.pexels_key else '✗'}")
     print(f"  Pixabay: {'✓' if editor.pixabay_key else '✗'}")
-    
-    # اختبار build_props_for_remotion
-    test_script = {
-        "title": "اختبار",
-        "duration_estimate": 10.0,
-        "scenes": [
-            {
-                "type": "hook",
-                "text": "السلام عليكم",
-                "duration": 3.0,
-                "pause_after": 0.3,
-            },
-            {
-                "type": "main",
-                "text": "هذا اختبار لـ Remotion",
-                "duration": 3.0,
-                "pause_after": 0.3,
-            },
-        ],
-    }
-    
-    print("\n📝 اختبار بناء props...")
-    # ملاحظة: لن يجلب الفيديوهات في الاختبار
-    # props = editor.build_props_for_remotion(test_script, "", [])
-    # print(json.dumps(props, indent=2, ensure_ascii=False))
