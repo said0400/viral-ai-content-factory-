@@ -1,10 +1,10 @@
 /**
- * 📝 Arabic Subtitle Component (TikTok Style)
+ * 📝 Arabic Subtitle Component (TikTok Style - Fixed RTL)
  * ═══════════════════════════════════════════════════════════════
  * عرض الترجمات العربية مع:
  *   ✓ تأثير Karaoke/Highlight لكل كلمة
  *   ✓ توقيت دقيق من Whisper
- *   ✓ أنيميشن سلس
+ *   ✓ ترتيب RTL صحيح للكلمات
  *   ✓ تصميم احترافي مثل TikTok
  * ═══════════════════════════════════════════════════════════════
  */
@@ -46,7 +46,7 @@ export const ArabicSubtitle: React.FC<ArabicSubtitleProps> = ({
     },
   });
 
-  // ─── أنيميشن الخروج (آخر 5 frames) ──────────────────────────
+  // ─── أنيميشن الخروج ───────────────────────────────────────────
   const exitFrames = 5;
   const exitStart = totalLocalFrames - exitFrames;
   const exitAnimation = interpolate(
@@ -80,17 +80,12 @@ export const ArabicSubtitle: React.FC<ArabicSubtitleProps> = ({
         display: "flex",
         justifyContent: "center",
         alignItems: "flex-end",
-        paddingBottom: videoHeight * 0.25,  // أعلى قليلاً من الـ bottom
+        paddingBottom: videoHeight * 0.25,
         pointerEvents: "none",
       }}
     >
       <div
         style={{
-          // ✅ الحل السحري للعربية
-          direction: "rtl",
-          textAlign: "center",
-          unicodeBidi: "plaintext",
-          
           // الخط
           fontFamily: "'Cairo', 'Tajawal', 'Almarai', sans-serif",
           fontSize: style?.fontSize || 90,
@@ -127,14 +122,25 @@ export const ArabicSubtitle: React.FC<ArabicSubtitleProps> = ({
 };
 
 // ════════════════════════════════════════════════════════════════════
-// 🎤 Karaoke Words (TikTok Style)
+// 🎤 Karaoke Words (TikTok Style - RTL Fixed)
 // ════════════════════════════════════════════════════════════════════
 const KaraokeWords: React.FC<{
   words: Array<{ text?: string; word?: string; start: number; end: number }>;
   currentTime: number;
 }> = ({ words, currentTime }) => {
   return (
-    <span style={{ direction: "rtl", display: "inline" }}>
+    // ✅ الحل: استخدام flexbox مع row-reverse للـ RTL الصحيح
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "row-reverse",  // 🎯 المفتاح السحري للـ RTL!
+        flexWrap: "wrap",
+        justifyContent: "center",
+        alignItems: "center",
+        gap: "0.3em",
+        direction: "rtl",
+      }}
+    >
       {words.map((word, index) => {
         // دعم النوعين: word.text أو word.word
         const wordText = word.text || word.word || "";
@@ -181,20 +187,19 @@ const KaraokeWords: React.FC<{
               transform: `scale(${scale})`,
               transition: "all 0.15s ease-out",
               display: "inline-block",
-              marginLeft: "0.25em",
-              marginRight: "0.05em",
               textShadow,
               backgroundColor,
-              padding: isActive ? "4px 12px" : "0",
-              borderRadius: isActive ? "8px" : "0",
+              padding: isActive ? "4px 14px" : "0",
+              borderRadius: isActive ? "10px" : "0",
               fontWeight: isActive ? 900 : "inherit",
+              whiteSpace: "nowrap",
             }}
           >
             {wordText}
           </span>
         );
       })}
-    </span>
+    </div>
   );
 };
 
@@ -203,8 +208,11 @@ const KaraokeWords: React.FC<{
 // ════════════════════════════════════════════════════════════════════
 const SimpleText: React.FC<{ text: string }> = ({ text }) => {
   return (
-    <span
+    <div
       style={{
+        direction: "rtl",
+        textAlign: "center",
+        unicodeBidi: "plaintext",
         color: "#FFFFFF",
         textShadow: `
           0 4px 20px rgba(0,0,0,0.95),
@@ -214,7 +222,7 @@ const SimpleText: React.FC<{ text: string }> = ({ text }) => {
       }}
     >
       {text}
-    </span>
+    </div>
   );
 };
 
