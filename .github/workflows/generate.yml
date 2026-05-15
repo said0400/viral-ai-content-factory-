@@ -1,4 +1,4 @@
-name: 🎬 Generate Arabic Shorts
+name: 🎬 Generate Arabic Shorts (Remotion Edition)
 
 on:
   workflow_dispatch:
@@ -50,46 +50,138 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      # ─────────────────────────────────────────────────────────
+      # ═══════════════════════════════════════════════════════════
+      # 1️⃣  Checkout Repository
+      # ═══════════════════════════════════════════════════════════
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      # ─────────────────────────────────────────────────────────
+      # ═══════════════════════════════════════════════════════════
+      # 2️⃣  Setup Python
+      # ═══════════════════════════════════════════════════════════
       - name: 🐍 Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      # ─────────────────────────────────────────────────────────
-      - name: 🎞️ Install FFmpeg & system dependencies
+      # ═══════════════════════════════════════════════════════════
+      # 3️⃣  🆕 Setup Node.js (لـ Remotion)
+      # ═══════════════════════════════════════════════════════════
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: remotion/package-lock.json
+
+      # ═══════════════════════════════════════════════════════════
+      # 4️⃣  Install System Dependencies (FFmpeg + Chromium)
+      # ═══════════════════════════════════════════════════════════
+      - name: 🎞️ Install FFmpeg & Chromium dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             ffmpeg \
             fonts-noto-core \
             fonts-noto-color-emoji \
-            fontconfig
+            fontconfig \
+            libnss3 \
+            libatk1.0-0 \
+            libatk-bridge2.0-0 \
+            libcups2 \
+            libdrm2 \
+            libxkbcommon0 \
+            libxcomposite1 \
+            libxdamage1 \
+            libxrandr2 \
+            libgbm1 \
+            libpango-1.0-0 \
+            libcairo2 \
+            libasound2t64 \
+            libxss1 \
+            libgconf-2-4 \
+            libxshmfence1 \
+            libglu1-mesa
 
-      # ─────────────────────────────────────────────────────────
+      # ═══════════════════════════════════════════════════════════
+      # 5️⃣  Install Python Dependencies
+      # ═══════════════════════════════════════════════════════════
       - name: 📦 Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ─────────────────────────────────────────────────────────
+      # ═══════════════════════════════════════════════════════════
+      # 6️⃣  🆕 Install Remotion Dependencies
+      # ═══════════════════════════════════════════════════════════
+      - name: 🎬 Install Remotion dependencies
+        working-directory: ./remotion
+        run: |
+          if [ -f "package-lock.json" ]; then
+            echo "✓ Using npm ci (faster)"
+            npm ci
+          else
+            echo "⚠ No package-lock.json, using npm install"
+            npm install
+          fi
+
+      # ═══════════════════════════════════════════════════════════
+      # 7️⃣  🆕 Verify Remotion Installation
+      # ═══════════════════════════════════════════════════════════
+      - name: ✅ Verify Remotion installation
+        working-directory: ./remotion
+        run: |
+          echo "📦 Node.js version:"
+          node --version
+          echo ""
+          echo "📦 NPM version:"
+          npm --version
+          echo ""
+          echo "📦 Remotion version:"
+          npx remotion --version || echo "⚠ Remotion CLI check failed"
+          echo ""
+          echo "📁 Remotion files:"
+          ls -la
+          echo ""
+          echo "📁 node_modules:"
+          ls node_modules/@remotion/ 2>/dev/null | head -5 || echo "⚠ No @remotion modules"
+
+      # ═══════════════════════════════════════════════════════════
+      # 8️⃣  Download Arabic Fonts
+      # ═══════════════════════════════════════════════════════════
       - name: 🔤 Download Arabic fonts
         run: python download_fonts.py
 
-      # ─────────────────────────────────────────────────────────
+      # ═══════════════════════════════════════════════════════════
+      # 9️⃣  Create Required Directories
+      # ═══════════════════════════════════════════════════════════
       - name: 📁 Create required directories
         run: |
           mkdir -p output temp
           mkdir -p engine/assets/fonts
           mkdir -p engine/assets/music
           mkdir -p engine/assets/sfx
+          mkdir -p remotion/public/fonts
+          mkdir -p remotion/out
 
-      # ─────────────────────────────────────────────────────────
+      # ═══════════════════════════════════════════════════════════
+      # 🔟  🆕 Pre-flight Check
+      # ═══════════════════════════════════════════════════════════
+      - name: 🔍 Pre-flight check
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          REMOTION_DIR: ./remotion
+        run: |
+          python main.py --check || echo "⚠ Some checks failed but continuing"
+
+      # ═══════════════════════════════════════════════════════════
+      # 1️⃣1️⃣  Generate Video
+      # ═══════════════════════════════════════════════════════════
       - name: 🎬 Generate video
         id: generate
         env:
@@ -121,6 +213,11 @@ jobs:
           OUTPUT_DIR: ./output
           TEMP_DIR: ./temp
 
+          # 🆕 Remotion Settings
+          REMOTION_DIR: ./remotion
+          USE_REMOTION: "true"
+          REMOTION_COMPOSITION: "ShortsVideo"
+
           # 📝 Content
           DEFAULT_TOPIC: ${{ github.event.inputs.topic }}
           CONTENT_TYPE: ${{ github.event.inputs.content_type }}
@@ -131,12 +228,18 @@ jobs:
             --duration "${{ github.event.inputs.duration }}" \
             --quality "${{ github.event.inputs.quality }}"
 
-      # ─────────────────────────────────────────────────────────
+      # ═══════════════════════════════════════════════════════════
+      # 1️⃣2️⃣  Get Video Info
+      # ═══════════════════════════════════════════════════════════
       - name: 📊 Get video info
         id: video_info
         if: success()
         run: |
-          VIDEO_FILE=$(ls output/*.mp4 | head -n 1)
+          VIDEO_FILE=$(ls output/*.mp4 2>/dev/null | head -n 1)
+          if [ -z "$VIDEO_FILE" ]; then
+            echo "❌ No video file found!"
+            exit 1
+          fi
           VIDEO_NAME=$(basename "$VIDEO_FILE")
           VIDEO_SIZE=$(du -h "$VIDEO_FILE" | cut -f1)
           TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
@@ -144,8 +247,14 @@ jobs:
           echo "video_name=$VIDEO_NAME" >> $GITHUB_OUTPUT
           echo "video_size=$VIDEO_SIZE" >> $GITHUB_OUTPUT
           echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          echo ""
+          echo "✅ Video generated:"
+          echo "   📁 File: $VIDEO_FILE"
+          echo "   📦 Size: $VIDEO_SIZE"
 
-      # ─────────────────────────────────────────────────────────
+      # ═══════════════════════════════════════════════════════════
+      # 1️⃣3️⃣  Upload as Artifact
+      # ═══════════════════════════════════════════════════════════
       - name: 📤 Upload as Artifact (backup)
         uses: actions/upload-artifact@v4
         if: success()
@@ -157,7 +266,9 @@ jobs:
             output/*.txt
           retention-days: 30
 
-      # ─────────────────────────────────────────────────────────
+      # ═══════════════════════════════════════════════════════════
+      # 1️⃣4️⃣  Publish to GitHub Release
+      # ═══════════════════════════════════════════════════════════
       - name: 🚀 Publish to GitHub Release
         if: success()
         uses: softprops/action-gh-release@v2
@@ -175,7 +286,8 @@ jobs:
             **📦 الحجم:** ${{ steps.video_info.outputs.video_size }}
 
             ---
-            🤖 تم الإنشاء بواسطة: AI Shorts Generator
+            🤖 تم الإنشاء بواسطة: **Remotion Edition** v2.0
+            🎬 محرك التصدير: Remotion (دعم كامل للعربية)
             🔗 رقم التشغيل: #${{ github.run_number }}
             📅 التاريخ: ${{ steps.video_info.outputs.timestamp }}
           files: |
@@ -186,11 +298,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ─────────────────────────────────────────────────────────
+      # ═══════════════════════════════════════════════════════════
+      # 1️⃣5️⃣  Workflow Summary
+      # ═══════════════════════════════════════════════════════════
       - name: 📋 Workflow Summary
         if: always()
         run: |
-          echo "## 🎬 ملخص التشغيل" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎬 ملخص التشغيل (Remotion Edition)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| الخاصية | القيمة |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
@@ -199,12 +313,29 @@ jobs:
           echo "| 🎙️ الصوت | ${{ github.event.inputs.voice }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ⏱️ المدة | ${{ github.event.inputs.duration }}s |" >> $GITHUB_STEP_SUMMARY
           echo "| ✨ الجودة | ${{ github.event.inputs.quality }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎬 المحرك | Remotion v4 |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔢 رقم التشغيل | #${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ✅ الحالة | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
 
-      # ─────────────────────────────────────────────────────────
+      # ═══════════════════════════════════════════════════════════
+      # 1️⃣6️⃣  🆕 Save logs on failure
+      # ═══════════════════════════════════════════════════════════
+      - name: 📋 Save logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-logs-${{ github.run_number }}
+          path: |
+            temp/
+            remotion/out/
+          retention-days: 7
+
+      # ═══════════════════════════════════════════════════════════
+      # 1️⃣7️⃣  Cleanup
+      # ═══════════════════════════════════════════════════════════
       - name: 🧹 Cleanup
         if: always()
         run: |
           rm -rf temp/ || true
+          rm -rf remotion/out/ || true
           echo "✅ تم التنظيف"
