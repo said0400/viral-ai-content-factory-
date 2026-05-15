@@ -1,22 +1,19 @@
 """
-🎬 Viral AI Content Factory — main.py (v2.1 - Optimized Edition)
+🎬 Viral AI Content Factory — main.py (v2.2 - Audio-First Edition)
 ═══════════════════════════════════════════════════════════════════
-مولّد فيديوهات Shorts عربية احترافية بالذكاء الاصطناعي
+الترتيب الجديد المحسّن:
+  1. توليد السكربت
+  2. توليد الصوت ⭐
+  3. تحسين الصوت ⭐
+  4. قياس المدة الفعلية للصوت ⭐
+  5. ضبط كل التوقيتات على مدة الصوت ⭐
+  6. بناء الفيديو بالمدة الصحيحة ⭐
 
-التغييرات في v2.1:
-  ✓ إضافة AudioOptimizer (إزالة فراغات + تسريع)
-  ✓ Whisper subtitles (TikTok style)
-  ✓ Gemini TTS (احترافي)
-  ✓ Viral Prompt Engine v3.0
-  ✓ Remotion للتصدير
-
-الميزات:
-  ✓ Groq + Gemini للسكربتات
-  ✓ Edge-TTS / ElevenLabs / Gemini للصوت
-  ✓ Pexels + Pixabay للفيديو
-  ✓ موسيقى خلفية + مؤثرات
-  ✓ ترجمة عربية احترافية
-  ✓ نشر تلقائي على GitHub Releases
+يحل مشاكل:
+  ❌ انكسار الصوت
+  ❌ تكرار الكلمات
+  ❌ تجاوز النص
+  ❌ فراغات في النهاية
 ═══════════════════════════════════════════════════════════════════
 """
 
@@ -40,8 +37,6 @@ from engine.voice                   import create_tts_engine
 from engine.voice.breathing_engine  import BreathingEngine
 from engine.voice.audio_fx          import AudioFX
 from engine.voice.music_engine      import MusicEngine
-
-# 🆕 المحركات الجديدة (Remotion mode)
 from engine.video                   import build_complete_props
 from engine.render                  import (
     RemotionRenderer,
@@ -64,16 +59,14 @@ COLORS = {
 
 
 def log(msg: str, kind: str = "info") -> None:
-    """طباعة رسالة ملوّنة."""
     print(f"{COLORS.get(kind, '')}{msg}{COLORS['reset']}")
 
 
 def banner() -> None:
-    """عرض شعار البداية."""
     log("━" * 60, "cyan")
     log("  🎬  VIRAL AI CONTENT FACTORY", "bold")
-    log("  Arabic Cinematic Shorts Generator v2.1", "info")
-    log("  ⭐ Remotion + Whisper + Audio Optimizer", "ok")
+    log("  Arabic Cinematic Shorts Generator v2.2", "info")
+    log("  ⭐ Audio-First Edition (No glitches!)", "ok")
     log("━" * 60, "cyan")
 
 
@@ -84,20 +77,17 @@ def check_env(use_remotion: bool = True) -> bool:
 
     ok = True
 
-    # --- مطلوب ---
     if not os.getenv("GROQ_API_KEY"):
         log("  ✗ GROQ_API_KEY مفقود (مطلوب)", "err")
         ok = False
     else:
         log("  ✓ GROQ_API_KEY", "ok")
 
-    # --- اختياري (احتياطي) ---
     if os.getenv("GEMINI_API_KEY"):
-        log("  ✓ GEMINI_API_KEY (احتياطي)", "ok")
+        log("  ✓ GEMINI_API_KEY", "ok")
     else:
-        log("  ⚠ GEMINI_API_KEY مفقود — لن يتوفر احتياطي للنصوص", "warn")
+        log("  ⚠ GEMINI_API_KEY مفقود", "warn")
 
-    # --- مصادر الفيديو ---
     if os.getenv("PEXELS_API_KEY"):
         log("  ✓ PEXELS_API_KEY", "ok")
     else:
@@ -108,28 +98,16 @@ def check_env(use_remotion: bool = True) -> bool:
     else:
         log("  ⚠ PIXABAY_API_KEY مفقود", "warn")
 
-    # --- TTS Engines ---
     tts_engine = os.getenv("TTS_ENGINE", "edge").lower()
     log(f"  ℹ TTS Engine: {tts_engine}", "info")
-    
-    if tts_engine == "elevenlabs" and os.getenv("ELEVENLABS_API_KEY"):
-        log("  ✓ ELEVENLABS_API_KEY", "ok")
-    elif tts_engine == "gemini" and os.getenv("GEMINI_API_KEY"):
-        log("  ✓ Gemini TTS متاح", "ok")
-    elif tts_engine == "edge":
-        log("  ✓ Edge TTS (مجاني)", "ok")
 
-    # --- 🆕 فحص Remotion ---
     log("\n🎬 فحص محرك التصدير...", "cyan")
 
     if use_remotion:
-        # فحص Node.js
         try:
             result = subprocess.run(
                 ["node", "--version"],
-                capture_output=True,
-                text=True,
-                timeout=10,
+                capture_output=True, text=True, timeout=10,
             )
             if result.returncode == 0:
                 log(f"  ✓ Node.js {result.stdout.strip()}", "ok")
@@ -138,49 +116,39 @@ def check_env(use_remotion: bool = True) -> bool:
                 ok = False
         except (FileNotFoundError, subprocess.TimeoutExpired):
             log("  ✗ Node.js غير مثبت", "err")
-            log("    ℹ حمّل من: https://nodejs.org/", "info")
             ok = False
 
-        # فحص مجلد Remotion
         remotion_dir = Path(os.getenv("REMOTION_DIR", "./remotion"))
         if remotion_dir.exists():
             log(f"  ✓ Remotion directory: {remotion_dir}", "ok")
-
             if (remotion_dir / "node_modules").exists():
                 log("  ✓ Remotion installed", "ok")
             else:
                 log("  ⚠ Remotion not installed!", "warn")
-                log(f"    شغّل: cd {remotion_dir} && npm install", "info")
                 ok = False
         else:
-            log(f"  ✗ Remotion directory not found: {remotion_dir}", "err")
+            log(f"  ✗ Remotion directory not found", "err")
             ok = False
 
         if REMOTION_AVAILABLE:
             log("  ✓ RemotionRenderer module loaded", "ok")
         else:
-            log("  ✗ RemotionRenderer module failed to load", "err")
+            log("  ✗ RemotionRenderer module failed", "err")
             ok = False
 
-    # --- FFmpeg ---
     try:
         result = subprocess.run(
             ["ffmpeg", "-version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
+            capture_output=True, text=True, timeout=10,
         )
         if result.returncode == 0:
             log("  ✓ FFmpeg", "ok")
-        else:
-            log("  ⚠ FFmpeg غير متاح", "warn")
     except (FileNotFoundError, subprocess.TimeoutExpired):
         log("  ⚠ FFmpeg غير مثبت", "warn")
 
     return ok
 
 
-# ─── إنشاء اسم ملف آمن ────────────────────────────────────────────────────
 def safe_filename(topic: str, max_len: int = 25) -> str:
     """تحويل الموضوع إلى اسم ملف آمن."""
     safe = "".join(c for c in topic if c.isalnum() or c in " _-")
@@ -188,7 +156,27 @@ def safe_filename(topic: str, max_len: int = 25) -> str:
     return safe or "video"
 
 
-# ─── 🆕 توليد الفيديو ────────────────────────────────────────────────────
+def get_audio_duration(audio_path: str) -> float:
+    """🆕 قياس المدة الفعلية للصوت بدقة."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                audio_path,
+            ],
+            capture_output=True, text=True, timeout=30, check=True,
+        )
+        return float(result.stdout.strip())
+    except Exception as e:
+        log(f"  ⚠ فشل قياس مدة الصوت: {e}", "warn")
+        return 0.0
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# 🆕 توليد الفيديو بترتيب Audio-First
+# ═════════════════════════════════════════════════════════════════════════
 def generate_video(
     topic: str,
     output_dir: str,
@@ -198,18 +186,13 @@ def generate_video(
     use_remotion: bool = True,
 ) -> str:
     """
-    توليد فيديو Shorts كامل من البداية للنهاية.
-
-    Args:
-        topic: موضوع الفيديو
-        output_dir: مجلد الإخراج
-        content_type: نوع المحتوى
-        duration: المدة المستهدفة بالثواني
-        quality: جودة التصدير
-        use_remotion: استخدام Remotion (افتراضي)
-
-    Returns:
-        مسار الفيديو الناتج
+    🆕 توليد فيديو بنظام Audio-First:
+    
+    1. السكربت
+    2. الصوت + التحسين
+    3. قياس المدة الفعلية ⭐
+    4. ضبط كل شيء على المدة الفعلية ⭐
+    5. الفيديو
     """
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe = safe_filename(topic)
@@ -227,69 +210,96 @@ def generate_video(
     fx           = AudioFX()
     music_engine = MusicEngine()
 
-    # 🆕 اختيار المحرك (Remotion أو FFmpeg legacy)
     if use_remotion and REMOTION_AVAILABLE:
         renderer = RemotionRenderer()
         log("  ✓ Renderer: Remotion (Arabic native)", "ok")
     elif FFMPEG_AVAILABLE:
         renderer = FFmpegBuilder()
-        log("  ⚠ Renderer: FFmpeg (Legacy mode)", "warn")
+        log("  ⚠ Renderer: FFmpeg (Legacy)", "warn")
     else:
         raise RuntimeError("❌ لا يوجد محرك تصدير متاح!")
 
     success = False
 
     try:
-        # ── 1: السكربت ──────────────────────────────────────────────
-        log("\n[1/5] 📝 توليد السكربت...", "cyan")
+        # ═══════════════════════════════════════════════════════════════
+        # 🆕 [1/6] توليد السكربت
+        # ═══════════════════════════════════════════════════════════════
+        log("\n[1/6] 📝 توليد السكربت...", "cyan")
         script = writer.generate_script(
             topic=topic,
             content_type=content_type,
             target_duration=duration,
         )
-        log(f"  ✓ {len(script['scenes'])} مشهد | ~{script['duration_estimate']:.0f}s", "ok")
+        log(f"  ✓ {len(script['scenes'])} مشهد | متوقع: ~{script['duration_estimate']:.0f}s", "ok")
         log(f"  ✓ Hook: {script['hook'][:60]}...", "info")
 
-        # ── 2: الصوت + التحسين ──────────────────────────────────────
-        log("\n[2/5] 🎙️  توليد الصوت...", "cyan")
+        # ═══════════════════════════════════════════════════════════════
+        # 🆕 [2/6] توليد الصوت الخام (TTS)
+        # ═══════════════════════════════════════════════════════════════
+        log("\n[2/6] 🎙️  توليد الصوت الخام...", "cyan")
         raw_voice = str(tmp / "voice_raw.mp3")
         tts.generate_audio(script, raw_voice)
+        
+        raw_duration = get_audio_duration(raw_voice)
+        log(f"  ✓ مدة الصوت الخام: {raw_duration:.1f}s", "ok")
 
+        # ═══════════════════════════════════════════════════════════════
+        # 🆕 [3/6] معالجة + تحسين الصوت
+        # ═══════════════════════════════════════════════════════════════
+        log("\n[3/6] 🎵 معالجة وتحسين الصوت...", "cyan")
+        
         breathed = str(tmp / "voice_breath.mp3")
         proc_voice = str(tmp / "voice_processed.mp3")
         optimized_voice = str(tmp / "voice_optimized.mp3")
 
+        # 1. إضافة التنفس
         breath.add_breathing(raw_voice, breathed)
+        
+        # 2. معالجة الصوت
         fx.process_voice(breathed, proc_voice)
-
-        # 🆕 تحسين الصوت (إزالة فراغات + تسريع + تطبيع)
-        log("  🎵 تحسين الصوت (إزالة فراغات + تسريع)...", "cyan")
+        
+        # 3. التحسين النهائي
         try:
             from engine.voice.audio_optimizer import AudioOptimizer
             audio_opt = AudioOptimizer()
             audio_opt.optimize(proc_voice, optimized_voice)
-            proc_voice = optimized_voice  # استخدم النسخة المحسّنة
+            proc_voice = optimized_voice
             log("  ✓ تم تحسين الصوت", "ok")
         except ImportError:
-            log("  ⚠ AudioOptimizer غير متوفر، استخدام الصوت الأصلي", "warn")
+            log("  ⚠ AudioOptimizer غير متوفر", "warn")
         except Exception as e:
             log(f"  ⚠ فشل تحسين الصوت: {e}", "warn")
 
-        # تحديث مدة الصوت بعد التحسين
-        audio_dur = fx.get_audio_duration(proc_voice)
-        script["duration_estimate"] = min(audio_dur + 1.5, 60.0)
-        log(f"  ✓ مدة الصوت النهائية: {audio_dur:.1f}s", "ok")
+        # ═══════════════════════════════════════════════════════════════
+        # 🆕 [4/6] قياس المدة الفعلية ⭐ هذه الخطوة المهمة!
+        # ═══════════════════════════════════════════════════════════════
+        log("\n[4/6] 📏 قياس المدة الفعلية للصوت...", "cyan")
+        
+        actual_audio_duration = get_audio_duration(proc_voice)
+        
+        if actual_audio_duration <= 0:
+            raise RuntimeError("❌ فشل قياس مدة الصوت!")
+        
+        log(f"  ✓ المدة الخام: {raw_duration:.1f}s", "info")
+        log(f"  ✓ المدة الفعلية بعد التحسين: {actual_audio_duration:.1f}s", "ok")
+        log(f"  ✓ توفير: {raw_duration - actual_audio_duration:.1f}s", "ok")
+        
+        # 🆕🆕🆕 نُحدّث script بالمدة الفعلية
+        script["duration_estimate"] = actual_audio_duration
+        script["actual_audio_duration"] = actual_audio_duration
 
-        # ── 3: مزج الصوت ────────────────────────────────────────────
-        log("\n[3/5] 🎵 مزج الصوت...", "cyan")
+        # ═══════════════════════════════════════════════════════════════
+        # 🆕 [5/6] مزج الصوت (موسيقى + SFX)
+        # ═══════════════════════════════════════════════════════════════
+        log("\n[5/6] 🎵 مزج الصوت النهائي...", "cyan")
         final_audio = str(tmp / "final_audio.mp3")
-        total_dur   = script["duration_estimate"]
-        mood        = script.get("music_mood", "motivational")
+        mood = script.get("music_mood", "motivational")
 
         log(f"  🎼 Mood: {mood}", "info")
 
         if os.getenv("ENABLE_BACKGROUND_MUSIC", "true").lower() == "true":
-            music_file = music_engine.get_music(mood, total_dur)
+            music_file = music_engine.get_music(mood, actual_audio_duration)
         else:
             music_file = None
 
@@ -309,32 +319,52 @@ def generate_video(
                         sfx_tracks.append((str(random.choice(sfx_files)), t, 0.35))
                         t += scene.get("duration", 3.0) + scene.get("pause_after", 0.3)
 
-            fx.mix_audio_tracks(proc_voice, proc_music, sfx_tracks, final_audio, total_dur)
+            fx.mix_audio_tracks(
+                proc_voice, proc_music, sfx_tracks,
+                final_audio, actual_audio_duration
+            )
             log(f"  ✓ صوت + موسيقى [{mood}]", "ok")
         else:
             shutil.copy(proc_voice, final_audio)
             log("  ✓ صوت فقط (بدون موسيقى)", "warn")
+        
+        # 🆕 قياس المدة النهائية بعد المزج
+        final_duration = get_audio_duration(final_audio)
+        log(f"  ✓ مدة الصوت النهائي: {final_duration:.1f}s", "ok")
+        
+        # تحديث script بالمدة النهائية المضمونة
+        script["duration_estimate"] = final_duration
+        script["actual_audio_duration"] = final_duration
 
-        # ── 4: 🆕 بناء props شامل لـ Remotion ───────────────────────
-        log("\n[4/5] 🎬 بناء props لـ Remotion...", "cyan")
+        # ═══════════════════════════════════════════════════════════════
+        # 🆕 [6/6] بناء الفيديو على مدة الصوت بالضبط
+        # ═══════════════════════════════════════════════════════════════
+        log("\n[6/6] 🎬 بناء الفيديو على مدة الصوت...", "cyan")
 
         if use_remotion and isinstance(renderer, RemotionRenderer):
+            # 🆕 نمرر المدة الفعلية للصوت للضمان
             props = build_complete_props(
                 script=script,
                 audio_path=final_audio,
                 output_dir=output_dir,
             )
+            
+            # 🆕 تأكيد المدة في props
+            props["totalDuration"] = final_duration
+            props["audioActualDuration"] = final_duration
+            
             log(f"  ✓ {props['meta']['totalScenes']} مشهد", "ok")
             log(f"  ✓ {props['meta']['totalSubtitles']} ترجمة", "ok")
             log(f"  ✓ {props['meta']['totalTransitions']} انتقال", "ok")
+            log(f"  ✓ مدة الفيديو: {final_duration:.1f}s (= مدة الصوت)", "ok")
         else:
-            log("  ❌ Legacy mode غير مدعوم بعد التحويل", "err")
-            raise NotImplementedError(
-                "Legacy FFmpeg mode تم إيقافه. استخدم Remotion."
-            )
+            log("  ❌ Legacy mode غير مدعوم", "err")
+            raise NotImplementedError("استخدم Remotion")
 
-        # ── 5: 🆕 التصدير بـ Remotion ──────────────────────────────
-        log("\n[5/5] 🚀 التصدير النهائي...", "cyan")
+        # ═══════════════════════════════════════════════════════════════
+        # 🚀 التصدير
+        # ═══════════════════════════════════════════════════════════════
+        log("\n🚀 التصدير النهائي...", "cyan")
 
         if use_remotion and isinstance(renderer, RemotionRenderer):
             renderer.render_final(
@@ -344,7 +374,7 @@ def generate_video(
                 metadata={
                     "title":       script.get("title", topic),
                     "description": script.get("hook", ""),
-                    "comment":     f"Generated by AI Shorts Factory v2.1 | {content_type}",
+                    "comment":     f"Generated by AI Shorts Factory v2.2 | {content_type}",
                 },
             )
 
@@ -365,12 +395,16 @@ def generate_video(
                 f.write(f"Title: {script.get('title', topic)}\n")
                 f.write(f"Topic: {topic}\n")
                 f.write(f"Type: {content_type}\n")
-                f.write(f"Duration: {script['duration_estimate']:.1f}s\n")
+                f.write(f"Duration: {final_duration:.1f}s\n")
                 f.write(f"Hook: {script.get('hook', '')}\n")
                 f.write(f"Generated: {ts}\n")
                 f.write(f"Renderer: {'Remotion' if use_remotion else 'FFmpeg'}\n")
                 f.write(f"TTS Engine: {os.getenv('TTS_ENGINE', 'edge')}\n")
                 f.write(f"Audio Speed: {os.getenv('AUDIO_SPEED', '1.0')}x\n")
+                f.write(f"Audio Pipeline:\n")
+                f.write(f"  Raw: {raw_duration:.1f}s\n")
+                f.write(f"  Optimized: {actual_audio_duration:.1f}s\n")
+                f.write(f"  Final: {final_duration:.1f}s\n")
             log(f"  ✓ Info: {Path(info_file).name}", "ok")
         except Exception:
             pass
@@ -399,49 +433,20 @@ def generate_video(
 # ─── الدالة الرئيسية ──────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(
-        description="🎬 Viral AI Content Factory v2.1 - Optimized Edition",
+        description="🎬 Viral AI Content Factory v2.2 - Audio-First Edition",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
-        "--topic", type=str,
-        default=os.getenv("DEFAULT_TOPIC", "الطموح والنجاح"),
-        help="موضوع الفيديو",
-    )
-    parser.add_argument(
-        "--type", type=str,
-        choices=["motivational", "educational", "story", "quote"],
-        default=os.getenv("CONTENT_TYPE", "motivational"),
-        help="نوع المحتوى",
-    )
-    parser.add_argument(
-        "--duration", type=int,
-        choices=[30, 45, 60],
-        default=int(os.getenv("VIDEO_TARGET_DURATION", "45")),
-        help="المدة المستهدفة بالثواني",
-    )
-    parser.add_argument(
-        "--quality", type=str,
-        choices=["medium", "high", "ultra"],
-        default=os.getenv("VIDEO_QUALITY", "high"),
-        help="جودة التصدير",
-    )
-    parser.add_argument(
-        "--output", type=str,
-        default=os.getenv("OUTPUT_DIR", "./output"),
-        help="مجلد الإخراج",
-    )
-    parser.add_argument(
-        "--batch", type=str, nargs="+",
-        help="توليد عدة فيديوهات (مواضيع متعددة)",
-    )
-    parser.add_argument(
-        "--use-ffmpeg", action="store_true",
-        help="استخدام FFmpeg القديم بدلاً من Remotion (Legacy)",
-    )
-    parser.add_argument(
-        "--check", action="store_true",
-        help="فحص البيئة فقط بدون توليد فيديو",
-    )
+    parser.add_argument("--topic", type=str, default=os.getenv("DEFAULT_TOPIC", "الطموح والنجاح"))
+    parser.add_argument("--type", type=str, choices=["motivational", "educational", "story", "quote"],
+                        default=os.getenv("CONTENT_TYPE", "motivational"))
+    parser.add_argument("--duration", type=int, choices=[30, 45, 60],
+                        default=int(os.getenv("VIDEO_TARGET_DURATION", "45")))
+    parser.add_argument("--quality", type=str, choices=["medium", "high", "ultra"],
+                        default=os.getenv("VIDEO_QUALITY", "high"))
+    parser.add_argument("--output", type=str, default=os.getenv("OUTPUT_DIR", "./output"))
+    parser.add_argument("--batch", type=str, nargs="+")
+    parser.add_argument("--use-ffmpeg", action="store_true")
+    parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
 
     banner()
@@ -449,15 +454,12 @@ def main():
     use_remotion = not args.use_ffmpeg
 
     if args.use_ffmpeg:
-        log("\n⚠ تم اختيار FFmpeg القديم (Legacy mode)", "warn")
-        log("  ℹ قد لا يعمل بعد التحويل", "warn")
+        log("\n⚠ تم اختيار FFmpeg القديم", "warn")
 
-    # فحص البيئة
     if not check_env(use_remotion=use_remotion):
-        log("\n❌ أصلح المشاكل المذكورة أعلاه ثم أعد المحاولة.", "err")
+        log("\n❌ أصلح المشاكل ثم أعد المحاولة.", "err")
         sys.exit(1)
 
-    # وضع الفحص فقط
     if args.check:
         log("\n✅ كل شيء جاهز للعمل!", "ok")
         sys.exit(0)
@@ -475,8 +477,7 @@ def main():
             log(
                 f"📋 النوع: {args.type} | "
                 f"⏱ المدة: {args.duration}s | "
-                f"✨ الجودة: {args.quality} | "
-                f"🎬 Renderer: {'Remotion' if use_remotion else 'FFmpeg'}",
+                f"✨ الجودة: {args.quality}",
                 "info",
             )
 
@@ -495,14 +496,13 @@ def main():
             log(f"📁 {result}", "ok")
             results.append((topic, True, result))
         except KeyboardInterrupt:
-            log("\n⚠ تم الإلغاء بواسطة المستخدم.", "warn")
+            log("\n⚠ تم الإلغاء.", "warn")
             sys.exit(0)
         except Exception as e:
-            log(f"\n❌ خطأ في توليد الفيديو: {e}", "err")
+            log(f"\n❌ خطأ: {e}", "err")
             traceback.print_exc()
             results.append((topic, False, str(e)))
 
-    # ── ملخص نهائي ────────────────────────────────────────────────
     if len(topics) > 1:
         log(f"\n{'═' * 60}", "cyan")
         log("  📊 الملخص النهائي", "bold")
