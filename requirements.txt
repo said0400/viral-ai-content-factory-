@@ -1,26 +1,25 @@
-# ════════════════════════════════════════════════════════════════════
-# 🎬 Viral AI Content Factory v2.1 - Remotion + Whisper Edition
-# ════════════════════════════════════════════════════════════════════
-
-# ─── 🤖 AI & Text Generation ───────────────────────────────────────────
+# AI & Text Generation
 google-generativeai>=0.7.0
 groq>=0.9.0
 
-# ─── 🎙️ Text To Speech (Arabic) ────────────────────────────────────────
+# 🆕 Gemini TTS
+google-genai>=0.3.0
+
+# Text To Speech (Arabic)
 edge-tts>=6.1.3
 elevenlabs>=1.2.0
 
-# ─── 🎵 Audio Processing ───────────────────────────────────────────────
+# Audio Processing
 pydub>=0.25.1
 yt-dlp>=2024.3.10
 
-# ─── 🆕 Whisper for Word-Level Timing ──────────────────────────────────
+# Whisper for Word-Level Captions
 faster-whisper>=1.0.0
 
-# ─── 🌐 Network & API Calls ────────────────────────────────────────────
+# Network & API
 requests>=2.31.0
 
-# ─── ⚙️ Utilities ──────────────────────────────────────────────────────
+# Utilities
 python-dotenv>=1.0.1
 tqdm>=4.66.4
 colorama>=0.4.6
