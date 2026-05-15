@@ -1,15 +1,11 @@
 /**
- * 📝 Arabic Subtitle Component
+ * 📝 Arabic Subtitle Component (TikTok Style)
  * ═══════════════════════════════════════════════════════════════
- * عرض الترجمات العربية بشكل احترافي مع:
- *   ✓ دعم كامل للـ RTL (من اليمين لليسار)
- *   ✓ Arabic Shaping تلقائي (المتصفح يقوم به)
- *   ✓ أنيميشن دخول/خروج سلس
- *   ✓ تأثيرات Glow و Shadow
- *   ✓ دعم تأثير Karaoke (كلمة بكلمة)
- *   ✓ خط Cairo + fallbacks متعددة
- * 
- * هذا هو الحل النهائي لمشكلة العربية في الفيديوهات! ⭐
+ * عرض الترجمات العربية مع:
+ *   ✓ تأثير Karaoke/Highlight لكل كلمة
+ *   ✓ توقيت دقيق من Whisper
+ *   ✓ أنيميشن سلس
+ *   ✓ تصميم احترافي مثل TikTok
  * ═══════════════════════════════════════════════════════════════
  */
 
@@ -21,11 +17,8 @@ import {
   interpolate,
   spring,
 } from "remotion";
-import { ArabicSubtitleProps, WordTiming } from "../types";
+import { ArabicSubtitleProps } from "../types";
 
-// ════════════════════════════════════════════════════════════════════
-// 📝 Arabic Subtitle Component
-// ════════════════════════════════════════════════════════════════════
 export const ArabicSubtitle: React.FC<ArabicSubtitleProps> = ({
   subtitle,
   style,
@@ -36,25 +29,25 @@ export const ArabicSubtitle: React.FC<ArabicSubtitleProps> = ({
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  // ─── حساب الوقت الحالي بالنسبة لبداية الترجمة ───────────────────
+  // ─── حساب الوقت الحالي بالنسبة لبداية الترجمة ────────────────
   const subtitleStartFrame = Math.floor(subtitle.start * fps);
   const subtitleEndFrame = Math.floor(subtitle.end * fps);
   const localFrame = frame - subtitleStartFrame;
   const totalLocalFrames = subtitleEndFrame - subtitleStartFrame;
 
-  // ─── أنيميشن الدخول (Spring) ────────────────────────────────────
+  // ─── أنيميشن الدخول (Spring) ─────────────────────────────────
   const enterAnimation = spring({
     frame: localFrame,
     fps,
     config: {
       damping: 12,
-      stiffness: 100,
-      mass: 0.5,
+      stiffness: 120,
+      mass: 0.4,
     },
   });
 
-  // ─── أنيميشن الخروج (آخر 10 frames) ─────────────────────────────
-  const exitFrames = 10;
+  // ─── أنيميشن الخروج (آخر 5 frames) ──────────────────────────
+  const exitFrames = 5;
   const exitStart = totalLocalFrames - exitFrames;
   const exitAnimation = interpolate(
     localFrame,
@@ -63,159 +56,141 @@ export const ArabicSubtitle: React.FC<ArabicSubtitleProps> = ({
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
   );
 
-  // ─── الـ Opacity النهائي ────────────────────────────────────────
   const opacity = isVisible
     ? Math.min(enterAnimation, exitAnimation)
     : 0;
 
-  // ─── أنيميشن التحرك للأعلى عند الدخول ───────────────────────────
-  const translateY = interpolate(enterAnimation, [0, 1], [30, 0], {
+  // ─── أنيميشن التحرك ──────────────────────────────────────────
+  const translateY = interpolate(enterAnimation, [0, 1], [40, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
-  // ─── أنيميشن التكبير الخفيف ─────────────────────────────────────
-  const scale = interpolate(enterAnimation, [0, 1], [0.92, 1], {
+  const scale = interpolate(enterAnimation, [0, 1], [0.8, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
-  // ─── حساب موضع الترجمة ──────────────────────────────────────────
-  const positionStyles = getPositionStyles(
-    style.position || "bottom",
-    style.positionOffset || 0.78,
-    videoHeight
-  );
+  // ─── الوقت الحالي بالثواني ────────────────────────────────────
+  const currentTimeInSeconds = frame / fps;
 
-  // ─── بناء الـ Style النهائي ─────────────────────────────────────
-  const subtitleStyle: React.CSSProperties = {
-    // ✅ الحل السحري للعربية
-    direction: style.direction || "rtl",
-    textAlign: style.textAlign || "center",
-    unicodeBidi: "plaintext",
-
-    // الخط والحجم
-    fontFamily: style.fontFamily,
-    fontSize: style.fontSize,
-    fontWeight: style.fontWeight,
-    color: style.color,
-    lineHeight: style.lineHeight || 1.4,
-    letterSpacing: style.letterSpacing || "0em",
-
-    // الخلفية
-    backgroundColor: style.backgroundColor || "transparent",
-    borderRadius: style.borderRadius || 0,
-    padding: style.padding || "0 60px",
-
-    // الظل والإضاءة
-    textShadow: buildTextShadow(style),
-
-    // الحدود (Stroke)
-    WebkitTextStroke: style.stroke
-      ? `${style.stroke.width}px ${style.stroke.color}`
-      : undefined,
-
-    // الأنيميشن
-    opacity,
-    transform: `translateY(${translateY}px) scale(${scale})`,
-
-    // تحسينات الخط
-    fontFeatureSettings: '"liga" 1, "calt" 1, "kern" 1',
-    WebkitFontSmoothing: "antialiased",
-    MozOsxFontSmoothing: "grayscale",
-
-    // التفاف النص
-    maxWidth: "92%",
-    wordWrap: "break-word",
-    whiteSpace: "pre-wrap",
-  };
-
-  // ════════════════════════════════════════════════════════════════
-  // 🎨 الـ Render
-  // ════════════════════════════════════════════════════════════════
   return (
     <AbsoluteFill
       style={{
         display: "flex",
         justifyContent: "center",
-        alignItems: "center",
+        alignItems: "flex-end",
+        paddingBottom: videoHeight * 0.25,  // أعلى قليلاً من الـ bottom
         pointerEvents: "none",
-        ...positionStyles,
       }}
     >
-      <div style={subtitleStyle}>
-        {/* إذا كان هناك توقيتات للكلمات → تأثير Karaoke */}
+      <div
+        style={{
+          // ✅ الحل السحري للعربية
+          direction: "rtl",
+          textAlign: "center",
+          unicodeBidi: "plaintext",
+          
+          // الخط
+          fontFamily: "'Cairo', 'Tajawal', 'Almarai', sans-serif",
+          fontSize: style?.fontSize || 90,
+          fontWeight: style?.fontWeight || 900,
+          
+          // الأنيميشن
+          opacity,
+          transform: `translateY(${translateY}px) scale(${scale})`,
+          
+          // التحسينات
+          fontFeatureSettings: '"liga" 1, "calt" 1, "kern" 1',
+          WebkitFontSmoothing: "antialiased",
+          
+          // التفاف
+          maxWidth: "90%",
+          padding: "0 40px",
+          lineHeight: 1.5,
+          letterSpacing: "0.02em",
+        }}
+      >
+        {/* 🎯 إذا كان هناك words، اعرض كل كلمة بتأثير Karaoke */}
         {subtitle.words && subtitle.words.length > 0 ? (
-          <KaraokeText
+          <KaraokeWords
             words={subtitle.words}
-            currentTime={frame / fps}
-            highlightColor={style.color}
-            normalColor={style.color}
-            highlightOpacity={1}
-            normalOpacity={0.4}
+            currentTime={currentTimeInSeconds}
           />
         ) : (
           // عرض النص العادي
-          <span>{subtitle.text}</span>
+          <SimpleText text={subtitle.text} />
         )}
       </div>
-
-      {/* طبقة الـ Glow (إذا كانت مفعّلة) */}
-      {style.glow?.enabled && (
-        <GlowLayer
-          text={subtitle.text}
-          style={subtitleStyle}
-          glow={style.glow}
-          opacity={opacity * 0.6}
-        />
-      )}
     </AbsoluteFill>
   );
 };
 
 // ════════════════════════════════════════════════════════════════════
-// 🎤 Karaoke Effect (تلوين الكلمة الحالية)
+// 🎤 Karaoke Words (TikTok Style)
 // ════════════════════════════════════════════════════════════════════
-const KaraokeText: React.FC<{
-  words: WordTiming[];
+const KaraokeWords: React.FC<{
+  words: Array<{ text?: string; word?: string; start: number; end: number }>;
   currentTime: number;
-  highlightColor: string;
-  normalColor: string;
-  highlightOpacity: number;
-  normalOpacity: number;
-}> = ({
-  words,
-  currentTime,
-  highlightColor,
-  normalColor,
-  highlightOpacity,
-  normalOpacity,
-}) => {
+}> = ({ words, currentTime }) => {
   return (
     <span style={{ direction: "rtl", display: "inline" }}>
       {words.map((word, index) => {
-        const isActive =
-          currentTime >= word.start && currentTime < word.end;
+        // دعم النوعين: word.text أو word.word
+        const wordText = word.text || word.word || "";
+        const isActive = currentTime >= word.start && currentTime < word.end;
         const isPast = currentTime >= word.end;
+        const isFuture = currentTime < word.start;
+
+        // اللون والحالة
+        let color = "#FFFFFF";
+        let opacity = 1;
+        let scale = 1;
+        let textShadow = "0 4px 20px rgba(0,0,0,0.95), 0 0 40px rgba(0,0,0,0.8)";
+        let backgroundColor = "transparent";
+
+        if (isActive) {
+          // ⭐ الكلمة الحالية - مميزة بشكل قوي
+          color = "#FFD700";  // ذهبي
+          opacity = 1;
+          scale = 1.15;
+          textShadow = `
+            0 4px 20px rgba(0,0,0,0.95),
+            0 0 30px rgba(255,215,0,0.8),
+            0 0 60px rgba(255,215,0,0.4)
+          `;
+          backgroundColor = "rgba(255,215,0,0.15)";
+        } else if (isPast) {
+          // ✅ الكلمات السابقة - بيضاء عادية
+          color = "#FFFFFF";
+          opacity = 0.95;
+          scale = 1;
+        } else if (isFuture) {
+          // ⏳ الكلمات القادمة - باهتة
+          color = "rgba(255,255,255,0.5)";
+          opacity = 0.5;
+          scale = 0.95;
+        }
 
         return (
           <span
             key={`word-${index}`}
             style={{
-              color: isActive || isPast ? highlightColor : normalColor,
-              opacity: isActive
-                ? 1
-                : isPast
-                ? highlightOpacity
-                : normalOpacity,
+              color,
+              opacity,
+              transform: `scale(${scale})`,
               transition: "all 0.15s ease-out",
-              marginLeft: "0.3em",
               display: "inline-block",
-              transform: isActive ? "scale(1.08)" : "scale(1)",
+              marginLeft: "0.25em",
+              marginRight: "0.05em",
+              textShadow,
+              backgroundColor,
+              padding: isActive ? "4px 12px" : "0",
+              borderRadius: isActive ? "8px" : "0",
               fontWeight: isActive ? 900 : "inherit",
             }}
           >
-            {word.text}
+            {wordText}
           </span>
         );
       })}
@@ -224,86 +199,23 @@ const KaraokeText: React.FC<{
 };
 
 // ════════════════════════════════════════════════════════════════════
-// ✨ Glow Layer (طبقة الإضاءة)
+// 📝 Simple Text (fallback)
 // ════════════════════════════════════════════════════════════════════
-const GlowLayer: React.FC<{
-  text: string;
-  style: React.CSSProperties;
-  glow: { color: string; blur: number };
-  opacity: number;
-}> = ({ text, style, glow, opacity }) => {
+const SimpleText: React.FC<{ text: string }> = ({ text }) => {
   return (
-    <div
+    <span
       style={{
-        ...style,
-        position: "absolute",
-        color: "transparent",
-        WebkitTextStroke: undefined,
-        textShadow: `0 0 ${glow.blur}px ${glow.color}, 0 0 ${
-          glow.blur * 2
-        }px ${glow.color}`,
-        filter: `blur(${glow.blur / 4}px)`,
-        opacity,
-        zIndex: -1,
+        color: "#FFFFFF",
+        textShadow: `
+          0 4px 20px rgba(0,0,0,0.95),
+          0 0 40px rgba(0,0,0,0.8),
+          2px 2px 4px rgba(0,0,0,0.9)
+        `,
       }}
     >
       {text}
-    </div>
+    </span>
   );
 };
 
-// ════════════════════════════════════════════════════════════════════
-// 🎯 دوال مساعدة
-// ════════════════════════════════════════════════════════════════════
-
-/**
- * حساب موضع الترجمة بناءً على الإعدادات
- */
-const getPositionStyles = (
-  position: string,
-  offset: number,
-  videoHeight: number
-): React.CSSProperties => {
-  switch (position) {
-    case "top":
-      return {
-        alignItems: "flex-start",
-        paddingTop: videoHeight * (1 - offset),
-      };
-
-    case "center":
-      return {
-        alignItems: "center",
-      };
-
-    case "bottom":
-    default:
-      return {
-        alignItems: "flex-end",
-        paddingBottom: videoHeight * (1 - offset),
-      };
-  }
-};
-
-/**
- * بناء text-shadow احترافي
- */
-const buildTextShadow = (style: any): string => {
-  // إذا كان text-shadow محدد، استخدمه
-  if (style.textShadow) {
-    return style.textShadow;
-  }
-
-  // text-shadow افتراضي قوي للظهور على أي خلفية
-  return [
-    "0 4px 20px rgba(0, 0, 0, 0.95)",
-    "0 0 40px rgba(0, 0, 0, 0.8)",
-    "2px 2px 4px rgba(0, 0, 0, 0.9)",
-    "-1px -1px 2px rgba(0, 0, 0, 0.8)",
-  ].join(", ");
-};
-
-// ════════════════════════════════════════════════════════════════════
-// 📦 Export
-// ════════════════════════════════════════════════════════════════════
 export default ArabicSubtitle;
