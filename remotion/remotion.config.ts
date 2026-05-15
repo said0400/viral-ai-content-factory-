@@ -53,7 +53,7 @@ Config.setLevel("info");
 Config.setEnforceAudioTrack(false);
 
 // السماح بمسارات الملفات الطويلة (للويندوز)
-Config.setNumberOfGifLoops(0);
+
 
 // ─── Webpack Override (للأداء) ────────────────────────────────────
 Config.overrideWebpackConfig((currentConfiguration) => {
