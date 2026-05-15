@@ -1,13 +1,12 @@
 """
-🎬 Cinematic Editor — مُجهّز البيانات لـ Remotion (مع Whisper)
+🎬 Cinematic Editor v2.2 — مُجهّز البيانات لـ Remotion (Audio-First)
 ═══════════════════════════════════════════════════════════════
-بعد التحول لـ Remotion + Whisper، أصبح هذا الملف مسؤولاً عن:
-  • جلب الفيديوهات من Pexels + Pixabay
-  • اختيار الكلمات المفتاحية الذكية (50+ keyword + visual_prompt)
-  • بناء JSON props كامل لـ Remotion
-  • تجهيز التايملاين (Timeline) للمشاهد
-  • مزامنة المشاهد مع مدة الصوت تلقائياً
-  • 🆕 استخراج توقيتات الكلمات بـ Whisper (TikTok style)
+بعد التحول لـ Audio-First Approach:
+  • قياس مدة الصوت الفعلية أولاً
+  • مزامنة كل المشاهد على مدة الصوت بدقة
+  • Whisper لتوقيتات الكلمات (TikTok style)
+  • تصحيح الفروقات الصغيرة في النهاية
+  • ضمان عدم تجاوز أو فراغات
 
 ضع في: engine/video/cinematic_editor.py
 ═══════════════════════════════════════════════════════════════
@@ -27,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class CinematicEditor:
-    """مُجهّز البيانات والمشاهد لـ Remotion."""
+    """مُجهّز البيانات والمشاهد لـ Remotion (Audio-First)."""
 
     # ════════════════════════════════════════════════════════════════
     #                    قواميس البحث
@@ -162,7 +161,7 @@ class CinematicEditor:
         self._clear_old_footage()
 
         logger.info(
-            f"🎬 CinematicEditor (Remotion mode) | {self.w}x{self.h}@{self.fps}fps"
+            f"🎬 CinematicEditor v2.2 (Audio-First) | {self.w}x{self.h}@{self.fps}fps"
         )
         logger.info(f"   🎤 Whisper: {'✓ enabled' if self.use_whisper else '✗ disabled'}")
 
@@ -183,7 +182,33 @@ class CinematicEditor:
             logger.warning(f"⚠ فشل المسح: {e}")
 
     # ════════════════════════════════════════════════════════════════
-    #                    🆕 الدالة الرئيسية
+    #              🆕 قياس مدة الصوت الفعلية
+    # ════════════════════════════════════════════════════════════════
+    def _get_actual_audio_duration(self, audio_path: str) -> float:
+        """🆕 قياس المدة الفعلية للصوت بدقة عالية."""
+        if not audio_path or not Path(audio_path).exists():
+            logger.warning("⚠ ملف الصوت غير موجود")
+            return 0.0
+
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe", "-v", "quiet",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    audio_path,
+                ],
+                capture_output=True, text=True, timeout=30, check=True,
+            )
+            duration = float(result.stdout.strip())
+            logger.info(f"   📏 مدة الصوت الفعلية: {duration:.2f}s")
+            return duration
+        except Exception as e:
+            logger.warning(f"⚠ فشل قياس مدة الصوت: {e}")
+            return 0.0
+
+    # ════════════════════════════════════════════════════════════════
+    #                    🆕 الدالة الرئيسية (Audio-First)
     # ════════════════════════════════════════════════════════════════
     def build_props_for_remotion(
         self,
@@ -192,46 +217,72 @@ class CinematicEditor:
         subtitle_data: list,
     ) -> dict:
         """
-        🆕 بناء JSON props كامل لـ Remotion.
-        مع مزامنة دقيقة بـ Whisper (TikTok style).
+        🆕 بناء JSON props كامل لـ Remotion (Audio-First).
+        
+        الترتيب:
+        1. قياس مدة الصوت الفعلية
+        2. تحديث script بالمدة الفعلية
+        3. Whisper لاستخراج توقيتات الكلمات
+        4. مزامنة المشاهد مع مدة الصوت بدقة
+        5. بناء كل البيانات
         """
         scenes = script.get("scenes", [])
-        total_dur = float(script.get("duration_estimate", 45.0))
 
         if not scenes:
             raise ValueError("❌ لا توجد مشاهد في السكربت")
 
-        logger.info(f"🎬 تجهيز Remotion props | {len(scenes)} مشهد | {total_dur:.1f}s")
+        # 🆕 1️⃣ قياس مدة الصوت الفعلية أولاً (أهم خطوة!)
+        logger.info("📏 قياس مدة الصوت الفعلية...")
+        actual_duration = self._get_actual_audio_duration(audio_path)
+        
+        # استخدم المدة الفعلية أو المتوقعة كـ fallback
+        if actual_duration > 0:
+            total_dur = actual_duration
+            logger.info(f"✓ سيتم بناء الفيديو على: {total_dur:.2f}s (مدة الصوت)")
+        else:
+            total_dur = float(script.get("duration_estimate", 45.0))
+            logger.warning(f"⚠ استخدام المدة المتوقعة: {total_dur:.2f}s")
 
-        # 🆕 1️⃣ استخدام Whisper لاستخراج توقيتات دقيقة من الصوت
+        # تحديث script
+        script["duration_estimate"] = total_dur
+        script["actual_audio_duration"] = total_dur
+
+        logger.info(f"🎬 تجهيز Remotion props | {len(scenes)} مشهد | {total_dur:.2f}s")
+
+        # 🆕 2️⃣ استخدام Whisper لاستخراج توقيتات دقيقة
         whisper_subtitles = []
         if self.use_whisper and audio_path:
             whisper_subtitles = self._get_whisper_subtitles(audio_path)
 
-        # 2️⃣ مزامنة توقيتات المشاهد مع مدة الصوت (للخلفيات فقط)
+        # 🆕 3️⃣ مزامنة المشاهد مع مدة الصوت بدقة
         self._sync_scenes_to_audio(scenes, total_dur)
 
-        # 3️⃣ جلب الفيديوهات
+        # 4️⃣ جلب الفيديوهات
         logger.info("► جلب الفيديوهات...")
         raws = self._fetch_footage(scenes)
 
-        # 4️⃣ بناء بيانات المشاهد
+        # 5️⃣ بناء بيانات المشاهد
         logger.info("► بناء بيانات المشاهد...")
         scenes_data = self._build_scenes_data(scenes, raws)
 
-        # 5️⃣ بناء بيانات الترجمات
+        # 6️⃣ بناء بيانات الترجمات
         if whisper_subtitles:
+            # 🆕 تحقق من أن Whisper subtitles لا تتجاوز مدة الصوت
+            whisper_subtitles = self._validate_whisper_subtitles(
+                whisper_subtitles, total_dur
+            )
             logger.info(f"✅ استخدام Whisper subtitles: {len(whisper_subtitles)} مجموعة")
             subtitles_data = whisper_subtitles
         else:
             logger.info("► بناء الترجمات من المشاهد (fallback)...")
             subtitles_data = self._build_subtitles_from_scenes(scenes)
 
-        # 6️⃣ تجهيز الـ props النهائية
+        # 7️⃣ تجهيز الـ props النهائية
         props = {
             # المعلومات العامة
             "title": script.get("title", ""),
             "totalDuration": total_dur,
+            "audioActualDuration": total_dur,  # 🆕 للتأكيد
             "fps": self.fps,
             "width": self.w,
             "height": self.h,
@@ -244,7 +295,7 @@ class CinematicEditor:
             "scenes": scenes_data,
             "subtitles": subtitles_data,
 
-            # إعدادات التصميم (Remotion سيستخدمها)
+            # إعدادات التصميم
             "design": {
                 "fontFamily": "Cairo",
                 "fontWeight": 900,
@@ -258,17 +309,75 @@ class CinematicEditor:
             },
         }
 
-        logger.info(f"✓ Remotion props جاهز | {len(scenes_data)} مشهد | {len(subtitles_data)} ترجمة")
+        logger.info(
+            f"✓ Remotion props جاهز | "
+            f"{len(scenes_data)} مشهد | "
+            f"{len(subtitles_data)} ترجمة | "
+            f"⏱ {total_dur:.2f}s"
+        )
         return props
 
-    # 🆕🆕🆕 دالة جديدة: استخدام Whisper 🆕🆕🆕
-    def _get_whisper_subtitles(self, audio_path: str) -> List[Dict]:
+    # 🆕🆕🆕 دالة جديدة: التحقق من Whisper subtitles
+    def _validate_whisper_subtitles(
+        self,
+        subtitles: List[Dict],
+        max_duration: float,
+    ) -> List[Dict]:
         """
-        🆕 استخراج ترجمات دقيقة من الصوت باستخدام Whisper.
+        🆕 التحقق من أن Whisper subtitles لا تتجاوز مدة الصوت.
         
-        Returns:
-            قائمة المجموعات (TikTok style) أو [] عند الفشل
+        - تقطع الترجمات التي تتجاوز المدة
+        - تُصلح أي توقيتات غير منطقية
         """
+        if not subtitles:
+            return []
+
+        validated = []
+        for sub in subtitles:
+            start = float(sub.get("start", 0))
+            end = float(sub.get("end", 0))
+
+            # تخطي الترجمات خارج النطاق
+            if start >= max_duration:
+                logger.debug(f"   ⚠ تخطي ترجمة خارج النطاق: {start:.2f}s")
+                continue
+
+            # قص الترجمات التي تتجاوز النهاية
+            if end > max_duration:
+                logger.debug(
+                    f"   ✂️ قص ترجمة: {end:.2f}s → {max_duration:.2f}s"
+                )
+                end = max_duration
+                sub["end"] = max_duration
+                sub["duration"] = end - start
+
+                # قص الكلمات أيضاً
+                if "words" in sub and sub["words"]:
+                    sub["words"] = [
+                        w for w in sub["words"]
+                        if float(w.get("start", 0)) < max_duration
+                    ]
+                    # تحديث آخر كلمة
+                    for word in sub["words"]:
+                        if float(word.get("end", 0)) > max_duration:
+                            word["end"] = max_duration
+
+            # تخطي الترجمات الفارغة
+            if not sub.get("text", "").strip():
+                continue
+
+            validated.append(sub)
+
+        if len(validated) != len(subtitles):
+            logger.info(
+                f"   📝 تصفية الترجمات: {len(subtitles)} → {len(validated)}"
+            )
+
+        return validated
+
+    # 🆕 دالة محسّنة: استخدام Whisper
+    def _get_whisper_subtitles(self, audio_path: str) -> List[Dict]:
+        """🆕 استخراج ترجمات دقيقة من الصوت باستخدام Whisper."""
         if not audio_path or not Path(audio_path).exists():
             logger.warning("⚠ ملف الصوت غير موجود لـ Whisper")
             return []
@@ -298,20 +407,24 @@ class CinematicEditor:
 
         except ImportError as e:
             logger.warning(f"⚠ Whisper غير مثبت: {e}")
-            logger.warning("   شغّل: pip install faster-whisper")
             return []
         except Exception as e:
             logger.error(f"❌ فشل Whisper: {e}")
             return []
 
-    # 🆕 دالة: مزامنة المشاهد مع مدة الصوت
+    # 🆕🆕🆕 دالة محسّنة: مزامنة دقيقة مع تصحيح الفروقات
     def _sync_scenes_to_audio(self, scenes: list, target_duration: float) -> None:
         """
-        🆕 إعادة توزيع توقيتات المشاهد لتطابق مدة الصوت الفعلية.
+        🆕 إعادة توزيع توقيتات المشاهد لتطابق مدة الصوت بالضبط.
+        
+        - يحافظ على النسب بين المشاهد
+        - يُصحّح الفروقات الصغيرة في النهاية
+        - يضمن مجموع = مدة الصوت تماماً
         """
         if not scenes:
             return
 
+        # حساب المدة الإجمالية الحالية
         current_total = sum(
             float(s.get("duration", 3.0)) + float(s.get("pause_after", 0.3))
             for s in scenes
@@ -321,32 +434,57 @@ class CinematicEditor:
             logger.warning("⚠ مجموع المدد صفر، تخطي المزامنة")
             return
 
+        # 🆕 حساب نسبة التعديل بدقة عالية
         scale_factor = target_duration / current_total
 
         logger.info(
-            f"🎯 مزامنة المشاهد: {current_total:.1f}s → {target_duration:.1f}s "
-            f"(scale: {scale_factor:.2f}x)"
+            f"🎯 مزامنة المشاهد: {current_total:.2f}s → {target_duration:.2f}s "
+            f"(scale: {scale_factor:.3f}x)"
         )
 
-        for scene in scenes:
+        # 🆕 تعديل كل مشهد بدقة
+        new_total = 0.0
+        for i, scene in enumerate(scenes):
             old_duration = float(scene.get("duration", 3.0))
             old_pause = float(scene.get("pause_after", 0.3))
 
-            new_duration = round(old_duration * scale_factor, 2)
-            new_pause = round(old_pause * scale_factor, 2)
+            new_duration = round(old_duration * scale_factor, 3)
+            new_pause = round(old_pause * scale_factor, 3)
 
-            new_duration = max(new_duration, 1.0)
-            new_pause = max(new_pause, 0.1)
+            # حد أدنى مرن (للسماح بمشاهد قصيرة)
+            new_duration = max(new_duration, 0.5)
+            new_pause = max(new_pause, 0.05)
 
             scene["duration"] = new_duration
             scene["pause_after"] = new_pause
+            new_total += new_duration + new_pause
 
-        new_total = sum(
+        # 🆕 تصحيح نهائي: إذا كان هناك فرق صغير، نُعدّل آخر مشهد
+        diff = target_duration - new_total
+        if abs(diff) > 0.01:
+            last_scene = scenes[-1]
+            old_pause = float(last_scene.get("pause_after", 0.3))
+            new_pause = max(old_pause + diff, 0.0)
+            last_scene["pause_after"] = round(new_pause, 3)
+            logger.info(f"   🔧 تصحيح فرق: {diff:+.3f}s على آخر مشهد")
+
+        # التحقق النهائي
+        final_total = sum(
             float(s.get("duration", 3.0)) + float(s.get("pause_after", 0.3))
             for s in scenes
         )
 
-        logger.info(f"✓ مدة المشاهد الجديدة: {new_total:.1f}s")
+        accuracy = abs(final_total - target_duration)
+        if accuracy < 0.05:
+            logger.info(
+                f"✓ مدة المشاهد النهائية: {final_total:.2f}s "
+                f"(دقة: {accuracy*1000:.0f}ms) ✅"
+            )
+        else:
+            logger.warning(
+                f"⚠ مدة المشاهد: {final_total:.2f}s "
+                f"(فرق: {accuracy*1000:.0f}ms)"
+            )
 
     def _build_scenes_data(self, scenes: list, raws: list) -> List[dict]:
         """بناء بيانات المشاهد كـ JSON."""
@@ -428,7 +566,7 @@ class CinematicEditor:
         """⚠️ DEPRECATED."""
         raise DeprecationWarning(
             "❌ build_video() لم تعد مدعومة!\n"
-            "   استخدم: build_props_for_remotion() ثم RemotionRenderer.render_final()"
+            "   استخدم: build_props_for_remotion()"
         )
 
     # ════════════════════════════════════════════════════════════════
@@ -694,7 +832,7 @@ class CinematicEditor:
 # ════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     editor = CinematicEditor()
-    print(f"✓ CinematicEditor (Remotion + Whisper mode) جاهز")
+    print(f"✓ CinematicEditor v2.2 (Audio-First) جاهز")
     print(f"  Dimensions: {editor.w}x{editor.h}")
     print(f"  FPS: {editor.fps}")
     print(f"  Quality: {editor.quality}")
