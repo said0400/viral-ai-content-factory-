@@ -1,108 +1,224 @@
 """
-🎞️ Transition Engine — انتقالات xfade سينمائية
+🎞️ Transition Engine — مولّد إعدادات الانتقالات لـ Remotion
 ═══════════════════════════════════════════════════════════════
-محرك انتقالات احترافي يستخدم FFmpeg xfade:
-  ✓ 15+ نوع transition
-  ✓ FPS Normalization تلقائي
-  ✓ تجميع حسب الطاقة (high/medium/low)
-  ✓ Fallback إلى concat عند الفشل
-  ✓ تنظيف تلقائي للملفات المؤقتة
+بعد التحول لـ Remotion، أصبح هذا الملف مسؤولاً عن:
+  ✓ توليد إعدادات الانتقالات (يُنفّذها Remotion بـ TransitionSeries)
+  ✓ تصنيف الانتقالات حسب الطاقة (high/medium/low)
+  ✓ خريطة أسماء Remotion-compatible
+  ✓ توليد انتقالات ذكية لكل المشاهد دفعة واحدة
+
+التغييرات الكبيرة:
+  ❌ حُذف: FFmpeg xfade (يُستبدل بـ Remotion TransitionSeries)
+  ❌ حُذف: تطبيع الفيديو (Remotion يطبّع تلقائياً)
+  ❌ حُذف: concat fallback (Remotion يجمع تلقائياً)
+  ✅ احتُفظ: تصنيف الانتقالات + الاختيار الذكي
+  ✅ أُضيف: get_transition_config() لـ Remotion
+  ✅ أُضيف: build_transitions_for_scenes()
+
+Remotion Transitions Available:
+  • fade        — تلاشي بسيط
+  • slide       — انزلاق
+  • wipe        — مسح
+  • flip        — قلب
+  • clockWipe   — مسح ساعة
+  • iris        — قزحية
+  • none        — بدون
 
 ضع في: engine/video/transition_engine.py
 ═══════════════════════════════════════════════════════════════
 """
 
 import os
-import json
 import random
-import shutil
 import logging
-import subprocess
 from pathlib import Path
-from typing import Optional, List
+from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class TransitionEngine:
-    """محرك الانتقالات السينمائية بين الـ clips."""
+    """مولّد إعدادات الانتقالات السينمائية لـ Remotion."""
 
-    # ─── تصنيف الـ transitions حسب الطاقة ───────────────────────
+    # ════════════════════════════════════════════════════════════════
+    #              تصنيف الانتقالات حسب الطاقة
+    # ════════════════════════════════════════════════════════════════
+    # Remotion-native transitions (من @remotion/transitions)
+    
     ENERGY_HIGH = [
-        "fadeblack",
-        "fadewhite",
-        "zoomin",
-        "pixelize",
-        "wipeleft",
-        "wiperight",
-        "circleopen",
-        "diagbl",
+        "fade-black",      # تلاشي للأسود
+        "fade-white",      # تلاشي للأبيض
+        "iris-burst",      # قزحية متفجرة
+        "wipe-left",       # مسح من اليمين لليسار
+        "wipe-right",      # مسح من اليسار لليمين
+        "flip-horizontal", # قلب أفقي
+        "zoom-in",         # تكبير قوي
+        "pixelate",        # بكسلات
     ]
 
     ENERGY_MEDIUM = [
-        "fade",
-        "slideup",
-        "slidedown",
-        "slideleft",
-        "slideright",
-        "smoothleft",
-        "smoothright",
+        "fade",            # تلاشي عادي
+        "slide-up",        # انزلاق للأعلى
+        "slide-down",      # انزلاق للأسفل
+        "slide-left",      # انزلاق لليسار
+        "slide-right",     # انزلاق لليمين
+        "wipe-up",         # مسح للأعلى
+        "wipe-down",       # مسح للأسفل
     ]
 
     ENERGY_LOW = [
-        "fade",
-        "smoothup",
-        "smoothdown",
-        "circlecrop",
-        "rectcrop",
-        "dissolve",
+        "fade",            # تلاشي خفيف
+        "smooth-fade",     # تلاشي ناعم
+        "dissolve",        # ذوبان
+        "iris-open",       # قزحية فاتحة
+        "iris-close",      # قزحية مغلقة
+        "clock-wipe",      # مسح ساعة
     ]
 
     ALL = list(set(ENERGY_HIGH + ENERGY_MEDIUM + ENERGY_LOW))
 
-    # ─── خريطة الأسماء المخصصة → xfade الرسمية ──────────────────
+    # ════════════════════════════════════════════════════════════════
+    #         خريطة الأسماء المخصصة → Remotion names
+    # ════════════════════════════════════════════════════════════════
     TRANSITION_MAP = {
-        # أسماء مخصصة → xfade names
-        "auto":              None,  # عشوائي
-        "flash_white":       "fadewhite",
-        "flash_black":       "fadeblack",
-        "fade_black":        "fadeblack",
-        "fade_white":        "fadewhite",
-        "glitch":            "pixelize",
-        "pixel":             "pixelize",
-        "zoom_burst":        "zoomin",
-        "zoom_in":           "zoomin",
-        "whip_right":        "wipeleft",
-        "whip_left":         "wiperight",
-        "wipe_left":         "wipeleft",
-        "wipe_right":        "wiperight",
+        # auto = عشوائي
+        "auto":              None,
+        "none":              "none",
+        
+        # تلاشي
+        "fade":              "fade",
+        "fade_black":        "fade-black",
+        "fade_white":        "fade-white",
+        "flash_black":       "fade-black",
+        "flash_white":       "fade-white",
         "cross_dissolve":    "fade",
-        "smooth_fade":       "fade",
+        "smooth_fade":       "smooth-fade",
         "dissolve":          "dissolve",
-        "push_up":           "slideup",
-        "push_down":         "slidedown",
-        "slide_left":        "slideleft",
-        "slide_right":       "slideright",
-        "smooth_left":       "smoothleft",
-        "smooth_right":      "smoothright",
-        "circle_open":       "circleopen",
-        "circle_close":      "circleclose",
-        "circle_crop":       "circlecrop",
-        "rect_crop":         "rectcrop",
-        "diag_bl":           "diagbl",
-        "diag_br":           "diagbr",
-        "diag_tl":           "diagtl",
-        "diag_tr":           "diagtr",
+
+        # انزلاق
+        "push_up":           "slide-up",
+        "push_down":         "slide-down",
+        "slide_left":        "slide-left",
+        "slide_right":       "slide-right",
+        "smooth_left":       "slide-left",
+        "smooth_right":      "slide-right",
+        "smooth_up":         "slide-up",
+        "smooth_down":       "slide-down",
+
+        # مسح
+        "wipe_left":         "wipe-left",
+        "wipe_right":        "wipe-right",
+        "wipe_up":           "wipe-up",
+        "wipe_down":         "wipe-down",
+        "whip_right":        "wipe-left",
+        "whip_left":         "wipe-right",
+
+        # تكبير
+        "zoom_burst":        "zoom-in",
+        "zoom_in":           "zoom-in",
+        "zoom_out":          "zoom-out",
+
+        # قزحية
+        "circle_open":       "iris-open",
+        "circle_close":      "iris-close",
+        "circle_crop":       "iris-burst",
+        "iris":              "iris-open",
+
+        # خاصة
+        "glitch":            "pixelate",
+        "pixel":             "pixelate",
+        "pixelize":          "pixelate",
+        "flip":              "flip-horizontal",
+        "flip_h":            "flip-horizontal",
+        "flip_v":            "flip-vertical",
+        "clock":             "clock-wipe",
+
+        # قص (rect/diag)
+        "rect_crop":         "iris-burst",
+        "diag_bl":           "wipe-left",
+        "diag_br":           "wipe-right",
+        "diag_tl":           "wipe-up",
+        "diag_tr":           "wipe-down",
     }
 
-    # ─── إعدادات الجودة ───────────────────────────────────────────
-    QUALITY_PRESETS = {
-        "medium": {"crf": 23, "preset": "fast"},
-        "high":   {"crf": 20, "preset": "fast"},
-        "ultra":  {"crf": 18, "preset": "medium"},
+    # ════════════════════════════════════════════════════════════════
+    #              إعدادات Easing لكل نوع
+    # ════════════════════════════════════════════════════════════════
+    EASING_PRESETS = {
+        "fade":            "ease-in-out",
+        "fade-black":      "ease-in",
+        "fade-white":      "ease-in",
+        "smooth-fade":     "ease-in-out",
+        "dissolve":        "linear",
+        "slide-up":        "ease-out",
+        "slide-down":      "ease-out",
+        "slide-left":      "ease-out",
+        "slide-right":     "ease-out",
+        "wipe-left":       "ease-in-out",
+        "wipe-right":      "ease-in-out",
+        "wipe-up":         "ease-in-out",
+        "wipe-down":       "ease-in-out",
+        "zoom-in":         "ease-in",
+        "zoom-out":        "ease-out",
+        "iris-open":       "ease-out",
+        "iris-close":      "ease-in",
+        "iris-burst":      "ease-in",
+        "flip-horizontal": "ease-in-out",
+        "flip-vertical":   "ease-in-out",
+        "clock-wipe":      "linear",
+        "pixelate":        "ease-in-out",
+        "none":            "linear",
     }
 
-    DEFAULT_TIMEOUT = 120
+    # ════════════════════════════════════════════════════════════════
+    #              مدة الانتقال حسب النوع
+    # ════════════════════════════════════════════════════════════════
+    DURATION_PRESETS = {
+        # سريعة (0.2s)
+        "fade-black":      0.2,
+        "fade-white":      0.2,
+        "zoom-in":         0.25,
+        "iris-burst":      0.25,
+        "pixelate":        0.3,
+
+        # متوسطة (0.4s)
+        "fade":            0.4,
+        "smooth-fade":     0.5,
+        "slide-up":        0.4,
+        "slide-down":      0.4,
+        "slide-left":      0.4,
+        "slide-right":     0.4,
+        "wipe-left":       0.4,
+        "wipe-right":      0.4,
+        "wipe-up":         0.4,
+        "wipe-down":       0.4,
+
+        # بطيئة (0.6s+)
+        "dissolve":        0.6,
+        "iris-open":       0.6,
+        "iris-close":      0.6,
+        "clock-wipe":      0.7,
+        "flip-horizontal": 0.5,
+        "flip-vertical":   0.5,
+
+        # افتراضي
+        "default":         0.4,
+        "none":            0.0,
+    }
+
+    # ════════════════════════════════════════════════════════════════
+    #         خريطة المشهد → الانتقالات المناسبة
+    # ════════════════════════════════════════════════════════════════
+    SCENE_TYPE_TRANSITIONS = {
+        "hook":       ENERGY_HIGH,       # افتتاحية → قوية
+        "build":      ENERGY_MEDIUM,     # بناء → متوسطة
+        "peak":       ENERGY_HIGH,       # ذروة → قوية
+        "resolution": ENERGY_MEDIUM,     # حل → متوسطة
+        "cta":        ENERGY_LOW,        # call to action → خفيفة
+        "main":       ENERGY_MEDIUM,     # عام → متوسطة
+        "intro":      ENERGY_HIGH,       # مقدمة → قوية
+        "outro":      ENERGY_LOW,        # خاتمة → خفيفة
+    }
 
     # ════════════════════════════════════════════════════════════════
     def __init__(self, video_width: int = 1080, video_height: int = 1920):
@@ -114,338 +230,299 @@ class TransitionEngine:
         self.w = video_width
         self.h = video_height
         self.fps = int(os.getenv("VIDEO_FPS", "30"))
-        self.quality = os.getenv("VIDEO_QUALITY", "high")
 
-        self.temp_dir = Path(os.getenv("TEMP_DIR", "./temp"))
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        # إعدادات قابلة للتخصيص
+        self.default_duration = float(os.getenv("TRANSITION_DURATION", "0.4"))
+        self.default_energy = os.getenv("TRANSITION_ENERGY", "medium")
+        self.enable_random = os.getenv("ENABLE_RANDOM_TRANSITIONS", "true").lower() == "true"
 
-        # مجلد فرعي للـ transitions
-        self.trans_dir = self.temp_dir / "transitions"
-        self.trans_dir.mkdir(exist_ok=True)
-
-        logger.debug(f"🎞️ TransitionEngine | {self.w}x{self.h}@{self.fps}fps")
-
-    # ════════════════════════════════════════════════════════════════
-    #                    الدالة الرئيسية
-    # ════════════════════════════════════════════════════════════════
-    def apply_transition(
-        self,
-        clip_a: str,
-        clip_b: str,
-        output_path: str,
-        transition_type: str = "auto",
-        duration: float = 0.2,
-    ) -> str:
-        """
-        تطبيق xfade transition بين clipين.
-
-        Args:
-            clip_a: الـ clip الأول
-            clip_b: الـ clip الثاني
-            output_path: مسار الإخراج
-            transition_type: نوع الانتقال (auto / flash_white / glitch / ...)
-            duration: مدة الانتقال بالثواني (0.1 - 2.0)
-        """
-        if not self._validate_inputs(clip_a, clip_b):
-            return self._concat_fallback(clip_a, clip_b, output_path)
-
-        # تطبيع الـ clipين
-        na = self._unique_temp("na")
-        nb = self._unique_temp("nb")
-
-        try:
-            self._normalize(clip_a, na)
-            self._normalize(clip_b, nb)
-
-            # اختيار xfade
-            xfade = self._pick_xfade(transition_type)
-
-            # حساب الـ offset
-            dur_a = self._get_duration(na)
-            offset = max(dur_a - duration - 0.01, 0.0)
-
-            # إعدادات الجودة
-            quality_cfg = self.QUALITY_PRESETS.get(
-                self.quality, self.QUALITY_PRESETS["high"]
-            )
-
-            cmd = [
-                "ffmpeg", "-y", "-loglevel", "error",
-                "-i", na,
-                "-i", nb,
-                "-filter_complex",
-                (
-                    f"[0:v][1:v]xfade="
-                    f"transition={xfade}:"
-                    f"duration={duration:.2f}:"
-                    f"offset={offset:.3f}[outv]"
-                ),
-                "-map", "[outv]",
-                "-c:v", "libx264",
-                "-preset", quality_cfg["preset"],
-                "-crf", str(quality_cfg["crf"]),
-                "-pix_fmt", "yuv420p",
-                "-r", str(self.fps),
-                "-an",
-                output_path,
-            ]
-
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    timeout=self.DEFAULT_TIMEOUT,
-                )
-
-                if result.returncode == 0 and Path(output_path).exists():
-                    logger.debug(f"✓ Transition '{xfade}' applied")
-                    return output_path
-                else:
-                    err = result.stderr.decode("utf-8", errors="ignore")[:200]
-                    logger.warning(f"⚠ xfade '{xfade}' failed: {err}")
-
-            except subprocess.TimeoutExpired:
-                logger.warning(f"⚠ xfade '{xfade}' timeout")
-            except Exception as e:
-                logger.warning(f"⚠ xfade error: {e}")
-
-            # Fallback إلى concat بسيط
-            return self._concat_fallback(na, nb, output_path)
-
-        finally:
-            # تنظيف الملفات المؤقتة
-            self._cleanup_files([na, nb])
-
-    # ════════════════════════════════════════════════════════════════
-    #                    تطبيع الفيديو
-    # ════════════════════════════════════════════════════════════════
-    def _normalize(self, input_path: str, output_path: str) -> str:
-        """
-        تطبيع FPS و pixel format و dimensions.
-        مهم جدًا لـ xfade لأنه يحتاج clips متطابقة تمامًا.
-        """
-        filter_str = (
-            f"fps={self.fps},"
-            f"scale={self.w}:{self.h}:force_original_aspect_ratio=decrease,"
-            f"pad={self.w}:{self.h}:(ow-iw)/2:(oh-ih)/2,"
-            f"setsar=1"
+        logger.debug(
+            f"🎞️ TransitionEngine (Remotion mode) | "
+            f"Energy: {self.default_energy} | Duration: {self.default_duration}s"
         )
 
-        cmd = [
-            "ffmpeg", "-y", "-loglevel", "error",
-            "-i", input_path,
-            "-vf", filter_str,
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "23",
-            "-pix_fmt", "yuv420p",
-            "-an",
-            output_path,
-        ]
+    # ════════════════════════════════════════════════════════════════
+    #              🆕 الدالة الرئيسية
+    # ════════════════════════════════════════════════════════════════
+    def get_transition_config(
+        self,
+        transition_type: str = "auto",
+        duration: Optional[float] = None,
+        scene_type: Optional[str] = None,
+    ) -> Dict:
+        """
+        🆕 إرجاع إعدادات الانتقال لـ Remotion.
 
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, timeout=self.DEFAULT_TIMEOUT
+        Args:
+            transition_type: نوع الانتقال (auto / fade / slide_left / ...)
+            duration: مدة الانتقال (إذا None، يُحسب تلقائياً)
+            scene_type: نوع المشهد (للاختيار الذكي)
+
+        Returns:
+            dict بإعدادات الانتقال:
+            {
+                "name": "fade",
+                "duration": 0.4,
+                "easing": "ease-in-out",
+                "direction": "from-left",  # للـ slide/wipe
+                "color": "#000000",         # للـ fade-black
+            }
+        """
+        # 1. حل الاسم
+        resolved = self._resolve_transition(transition_type, scene_type)
+
+        # 2. تحديد المدة
+        if duration is None:
+            duration = self.DURATION_PRESETS.get(
+                resolved, self.DURATION_PRESETS["default"]
             )
-            if result.returncode == 0:
-                return output_path
-            logger.warning(f"⚠ normalize failed")
-        except subprocess.TimeoutExpired:
-            logger.warning("⚠ normalize timeout")
-        except Exception as e:
-            logger.warning(f"⚠ normalize error: {e}")
 
-        # Fallback
-        return self._safe_copy(input_path, output_path)
+        # 3. بناء الإعدادات
+        config = {
+            "name": resolved,
+            "duration": round(duration, 3),
+            "easing": self.EASING_PRESETS.get(resolved, "ease-in-out"),
+        }
 
-    # ════════════════════════════════════════════════════════════════
-    #                    اختيار الـ xfade
-    # ════════════════════════════════════════════════════════════════
-    def _pick_xfade(self, transition_type: str) -> str:
-        """اختيار نوع xfade المناسب."""
-        # 1. اسم مباشر من xfade
+        # 4. خصائص خاصة لكل نوع
+        config.update(self._get_type_specific_props(resolved))
+
+        return config
+
+    def _resolve_transition(
+        self,
+        transition_type: str,
+        scene_type: Optional[str] = None,
+    ) -> str:
+        """حل اسم الانتقال إلى Remotion-compatible name."""
+        # 1. اسم مباشر متاح
         if transition_type in self.ALL:
             return transition_type
 
         # 2. اسم مخصص من الخريطة
         mapped = self.TRANSITION_MAP.get(transition_type)
-        if mapped:
-            return mapped
+        if mapped is not None:
+            return mapped if mapped else self._random_for_scene(scene_type)
 
-        # 3. auto أو غير معروف → عشوائي
-        if transition_type == "auto" or transition_type not in self.TRANSITION_MAP:
-            return random.choice(self.ENERGY_MEDIUM)
+        # 3. auto أو غير معروف → عشوائي حسب نوع المشهد
+        return self._random_for_scene(scene_type)
 
-        # 4. الافتراضي
-        return "fade"
+    def _random_for_scene(self, scene_type: Optional[str] = None) -> str:
+        """اختيار انتقال عشوائي مناسب للمشهد."""
+        if scene_type and scene_type in self.SCENE_TYPE_TRANSITIONS:
+            pool = self.SCENE_TYPE_TRANSITIONS[scene_type]
+        else:
+            pool = self._get_pool_by_energy(self.default_energy)
+
+        return random.choice(pool) if self.enable_random else pool[0]
+
+    def _get_pool_by_energy(self, energy: str) -> List[str]:
+        """الحصول على pool حسب مستوى الطاقة."""
+        pools = {
+            "high": self.ENERGY_HIGH,
+            "medium": self.ENERGY_MEDIUM,
+            "low": self.ENERGY_LOW,
+        }
+        return pools.get(energy.lower(), self.ENERGY_MEDIUM)
+
+    def _get_type_specific_props(self, transition_name: str) -> Dict:
+        """خصائص إضافية حسب نوع الانتقال."""
+        props = {}
+
+        # Slide & Wipe → direction
+        if transition_name.startswith("slide-") or transition_name.startswith("wipe-"):
+            direction = transition_name.split("-")[1]
+            props["direction"] = direction  # left, right, up, down
+
+        # Fade-black/white → color
+        elif transition_name == "fade-black":
+            props["color"] = "#000000"
+        elif transition_name == "fade-white":
+            props["color"] = "#FFFFFF"
+
+        # Zoom → scale
+        elif transition_name == "zoom-in":
+            props["scaleFrom"] = 1.0
+            props["scaleTo"] = 1.5
+        elif transition_name == "zoom-out":
+            props["scaleFrom"] = 1.5
+            props["scaleTo"] = 1.0
+
+        # Iris → shape
+        elif transition_name.startswith("iris-"):
+            props["shape"] = "circle"
+            if transition_name == "iris-burst":
+                props["scale"] = 2.0
+
+        # Flip → axis
+        elif transition_name == "flip-horizontal":
+            props["axis"] = "x"
+        elif transition_name == "flip-vertical":
+            props["axis"] = "y"
+
+        # Pixelate → strength
+        elif transition_name == "pixelate":
+            props["pixelSize"] = 20
+
+        return props
 
     # ════════════════════════════════════════════════════════════════
-    #                    Fallback (concat)
+    #              🆕 بناء انتقالات لكل المشاهد
     # ════════════════════════════════════════════════════════════════
-    def _concat_fallback(
+    def build_transitions_for_scenes(
         self,
-        a: str,
-        b: str,
-        output_path: str,
-    ) -> str:
-        """Fallback عند فشل xfade - concat بسيط."""
-        list_file = self._unique_temp("cat", ext="txt")
+        scenes: List[Dict],
+        default_type: str = "auto",
+    ) -> List[Dict]:
+        """
+        🆕 بناء قائمة انتقالات لكل المشاهد.
 
-        try:
-            with open(list_file, "w", encoding="utf-8") as f:
-                f.write(f"file '{Path(a).resolve()}'\n")
-                f.write(f"file '{Path(b).resolve()}'\n")
+        Args:
+            scenes: قائمة المشاهد
+            default_type: النوع الافتراضي
 
-            cmd = [
-                "ffmpeg", "-y", "-loglevel", "error",
-                "-f", "concat",
-                "-safe", "0",
-                "-i", list_file,
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "22",
-                "-pix_fmt", "yuv420p",
-                "-r", str(self.fps),
-                "-an",
-                output_path,
+        Returns:
+            قائمة الانتقالات (واحد بين كل مشهدين متتاليين)
+            [
+                {
+                    "fromScene": 0,
+                    "toScene": 1,
+                    "name": "fade",
+                    "duration": 0.4,
+                    "easing": "ease-in-out",
+                },
+                ...
             ]
+        """
+        if len(scenes) < 2:
+            return []
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                timeout=self.DEFAULT_TIMEOUT,
+        transitions = []
+        used_recently = []  # لتجنب التكرار المباشر
+
+        for i in range(1, len(scenes)):
+            scene_type = scenes[i].get("type", "main")
+
+            # اختيار transition من pool المشهد
+            pool = self.SCENE_TYPE_TRANSITIONS.get(
+                scene_type, self.ENERGY_MEDIUM
             )
 
-            if result.returncode == 0:
-                logger.debug("✓ Concat fallback succeeded")
-                return output_path
+            # تجنب التكرار (آخر 2 transitions)
+            available = [t for t in pool if t not in used_recently[-2:]]
+            if not available:
+                available = pool
 
-            logger.warning("⚠ Concat fallback failed")
+            transition_name = random.choice(available) if self.enable_random else available[0]
+            used_recently.append(transition_name)
 
-        except Exception as e:
-            logger.error(f"❌ Concat error: {e}")
-        finally:
-            self._cleanup_files([list_file])
-
-        # آخر fallback: نسخ الـ clip الأول
-        return self._safe_copy(a, output_path)
-
-    # ════════════════════════════════════════════════════════════════
-    #                    دوال مساعدة
-    # ════════════════════════════════════════════════════════════════
-    def _validate_inputs(self, *paths: str) -> bool:
-        """التحقق من وجود الملفات."""
-        for path in paths:
-            if not Path(path).exists():
-                logger.error(f"❌ الملف غير موجود: {path}")
-                return False
-            if Path(path).stat().st_size < 1000:
-                logger.error(f"❌ الملف فارغ أو تالف: {path}")
-                return False
-        return True
-
-    def _get_duration(self, path: str) -> float:
-        """الحصول على مدة الفيديو."""
-        try:
-            result = subprocess.run(
-                [
-                    "ffprobe", "-v", "quiet",
-                    "-show_entries", "format=duration",
-                    "-of", "default=noprint_wrappers=1:nokey=1",
-                    path,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=True,
+            # الحصول على الإعدادات الكاملة
+            config = self.get_transition_config(
+                transition_type=transition_name,
+                scene_type=scene_type,
             )
-            return float(result.stdout.strip())
-        except Exception as e:
-            logger.warning(f"⚠ فشل قراءة المدة: {e}")
-            return 3.0
 
-    def _unique_temp(self, prefix: str, ext: str = "mp4") -> str:
-        """توليد اسم ملف فريد."""
-        pid = os.getpid()
-        rnd = random.randint(10000, 99999)
-        return str(self.trans_dir / f"{prefix}_{pid}_{rnd}.{ext}")
+            transitions.append({
+                "fromScene": i - 1,
+                "toScene": i,
+                **config,
+            })
 
-    def _safe_copy(self, src: str, dst: str) -> str:
-        """نسخ آمن."""
-        try:
-            if Path(src).exists() and src != dst:
-                shutil.copy(src, dst)
-        except Exception as e:
-            logger.error(f"❌ فشل النسخ: {e}")
-        return dst
-
-    def _cleanup_files(self, files: List[str]) -> None:
-        """حذف ملفات مؤقتة."""
-        for f in files:
-            try:
-                Path(f).unlink(missing_ok=True)
-            except Exception:
-                pass
+        return transitions
 
     # ════════════════════════════════════════════════════════════════
-    #                    دوال عامة إضافية
+    #              دوال مساعدة عامة
     # ════════════════════════════════════════════════════════════════
-    def get_random_transition(self, energy: str = "medium") -> str:
+    def get_random_transition(
+        self,
+        energy: str = "medium",
+    ) -> Dict:
         """
         الحصول على transition عشوائي حسب الطاقة.
 
         Args:
             energy: high / medium / low
-        """
-        if energy == "high":
-            return random.choice(self.ENERGY_HIGH)
-        elif energy == "low":
-            return random.choice(self.ENERGY_LOW)
-        else:
-            return random.choice(self.ENERGY_MEDIUM)
 
-    def list_transitions(self) -> dict:
-        """قائمة بكل الـ transitions المتاحة."""
+        Returns:
+            dict كامل بالإعدادات
+        """
+        pool = self._get_pool_by_energy(energy)
+        name = random.choice(pool)
+        return self.get_transition_config(name)
+
+    def list_transitions(self) -> Dict:
+        """قائمة بكل الانتقالات المتاحة."""
         return {
-            "high":   self.ENERGY_HIGH,
+            "high": self.ENERGY_HIGH,
             "medium": self.ENERGY_MEDIUM,
-            "low":    self.ENERGY_LOW,
-            "custom": list(self.TRANSITION_MAP.keys()),
+            "low": self.ENERGY_LOW,
+            "all": self.ALL,
+            "custom_aliases": list(self.TRANSITION_MAP.keys()),
         }
 
+    def get_transition_info(self, transition_name: str) -> Dict:
+        """معلومات تفصيلية عن transition محدد."""
+        resolved = self._resolve_transition(transition_name)
+        return {
+            "input": transition_name,
+            "resolved": resolved,
+            "duration": self.DURATION_PRESETS.get(resolved, 0.4),
+            "easing": self.EASING_PRESETS.get(resolved, "ease-in-out"),
+            "props": self._get_type_specific_props(resolved),
+        }
+
+    # ════════════════════════════════════════════════════════════════
+    #              🔁 دوال Legacy (Deprecated)
+    # ════════════════════════════════════════════════════════════════
+    def apply_transition(self, *args, **kwargs):
+        """⚠️ DEPRECATED: استخدم get_transition_config() بدلاً منها."""
+        raise DeprecationWarning(
+            "❌ apply_transition() لم تعد مدعومة!\n"
+            "   استخدم: get_transition_config(transition_type)\n"
+            "   ثم مرّر النتيجة لـ Remotion في props\n"
+            "\n"
+            "   مثال:\n"
+            "   config = engine.get_transition_config('fade', duration=0.5)\n"
+            "   # سيُمرّر إلى Remotion's <TransitionSeries>"
+        )
+
     def cleanup(self) -> None:
-        """تنظيف كل الملفات المؤقتة للـ transitions."""
-        try:
-            count = 0
-            for f in self.trans_dir.glob("*"):
-                f.unlink(missing_ok=True)
-                count += 1
-            if count:
-                logger.info(f"🧹 تم تنظيف {count} ملف transition")
-        except Exception as e:
-            logger.warning(f"⚠ فشل التنظيف: {e}")
+        """⚠️ لم تعد ضرورية - لا توجد ملفات مؤقتة."""
+        logger.debug("✓ لا حاجة للتنظيف في Remotion mode")
 
 
 # ════════════════════════════════════════════════════════════════════════
 #                    اختبار سريع
 # ════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    import sys
-
-    if len(sys.argv) < 4:
-        print("Usage: python transition_engine.py <clip_a> <clip_b> <output> [type]")
-        print("\nAvailable transitions:")
-        engine = TransitionEngine()
-        trans = engine.list_transitions()
-        for category, items in trans.items():
-            print(f"  {category}: {', '.join(items[:8])}{'...' if len(items) > 8 else ''}")
-        sys.exit(1)
+    import json
 
     engine = TransitionEngine()
-    transition = sys.argv[4] if len(sys.argv) > 4 else "auto"
 
-    print(f"🎞️ Applying '{transition}' transition...")
-    result = engine.apply_transition(
-        sys.argv[1], sys.argv[2], sys.argv[3], transition, 0.5
-    )
-    print(f"✓ Done: {result}")
+    print("✓ TransitionEngine (Remotion mode) جاهز")
+    print(f"  Default energy: {engine.default_energy}")
+    print(f"  Default duration: {engine.default_duration}s")
+    print(f"  Random enabled: {engine.enable_random}")
+
+    print("\n📦 Transitions by energy:")
+    transitions = engine.list_transitions()
+    print(f"  High: {transitions['high'][:5]}...")
+    print(f"  Medium: {transitions['medium'][:5]}...")
+    print(f"  Low: {transitions['low'][:5]}...")
+
+    print("\n🎯 اختبار get_transition_config:")
+    for name in ["fade", "flash_black", "slide_left", "auto"]:
+        config = engine.get_transition_config(name)
+        print(f"\n  {name}:")
+        print(f"    {json.dumps(config, indent=4, ensure_ascii=False)}")
+
+    print("\n🎬 اختبار build_transitions_for_scenes:")
+    test_scenes = [
+        {"type": "hook"},
+        {"type": "build"},
+        {"type": "peak"},
+        {"type": "resolution"},
+        {"type": "cta"},
+    ]
+    all_trans = engine.build_transitions_for_scenes(test_scenes)
+    print(json.dumps(all_trans, indent=2, ensure_ascii=False))
