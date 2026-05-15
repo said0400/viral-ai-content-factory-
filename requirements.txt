@@ -1,15 +1,5 @@
 # ════════════════════════════════════════════════════════════════════
-# 🎬 Viral AI Content Factory v2.0 - Remotion Edition
-# ════════════════════════════════════════════════════════════════════
-# 
-# ملاحظة مهمة:
-# بعد التحول لـ Remotion، تم حذف المكتبات التالية:
-#   ❌ arabic-reshaper  → Remotion يعالج العربية natively
-#   ❌ python-bidi      → Remotion يعالج RTL natively
-#   ❌ Pillow           → لا حاجة لرسم PNG للترجمات
-#   ❌ ffmpeg-python    → استبدل بـ subprocess
-#
-# Remotion يحتاج Node.js (مُثبّت منفصلاً، ليس من pip)
+# 🎬 Viral AI Content Factory v2.1 - Remotion + Whisper Edition
 # ════════════════════════════════════════════════════════════════════
 
 # ─── 🤖 AI & Text Generation ───────────────────────────────────────────
@@ -24,6 +14,9 @@ elevenlabs>=1.2.0
 pydub>=0.25.1
 yt-dlp>=2024.3.10
 
+# ─── 🆕 Whisper for Word-Level Timing ──────────────────────────────────
+faster-whisper>=1.0.0
+
 # ─── 🌐 Network & API Calls ────────────────────────────────────────────
 requests>=2.31.0
 
@@ -31,18 +24,3 @@ requests>=2.31.0
 python-dotenv>=1.0.1
 tqdm>=4.66.4
 colorama>=0.4.6
-
-# ════════════════════════════════════════════════════════════════════
-# 🚀 Remotion Setup (يُثبّت منفصلاً)
-# ════════════════════════════════════════════════════════════════════
-#
-# 1. ثبّت Node.js 18+ من: https://nodejs.org/
-#
-# 2. ثبّت Remotion:
-#    cd remotion
-#    npm install
-#
-# 3. اختبار:
-#    npx remotion studio
-#
-# ════════════════════════════════════════════════════════════════════
