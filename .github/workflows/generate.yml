@@ -1,4 +1,4 @@
-name: 🎬 Generate Arabic Shorts (Optimized Edition v2.1)
+name: 🎬 Generate Arabic Shorts (Pro Audio Edition v2.3)
 
 on:
   workflow_dispatch:
@@ -53,7 +53,7 @@ on:
           - Charon
           - Kore
       
-      # 🆕 سرعة الصوت
+      # ⚡ سرعة الصوت
       audio_speed:
         description: "⚡ سرعة الصوت (1.0=طبيعي, 1.1=سريع TikTok)"
         required: false
@@ -67,7 +67,7 @@ on:
           - "1.2"
           - "1.25"
       
-      # 🆕 إزالة الفراغات
+      # 🔇 إزالة الفراغات
       remove_silence:
         description: "🔇 إزالة الفراغات الطويلة"
         required: false
@@ -76,6 +76,48 @@ on:
         options:
           - "true"
           - "false"
+      
+      # 🆕 الموسيقى الخلفية
+      enable_music:
+        description: "🎵 تفعيل الموسيقى الخلفية"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      
+      music_volume:
+        description: "🎵 مستوى الموسيقى"
+        required: false
+        default: "0.15"
+        type: choice
+        options:
+          - "0.10"
+          - "0.15"
+          - "0.20"
+          - "0.25"
+      
+      # 🆕 المؤثرات الصوتية SFX
+      enable_sfx:
+        description: "🔊 تفعيل المؤثرات الصوتية"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      
+      sfx_volume:
+        description: "🔊 مستوى المؤثرات"
+        required: false
+        default: "0.35"
+        type: choice
+        options:
+          - "0.25"
+          - "0.35"
+          - "0.45"
+          - "0.50"
       
       duration:
         description: "⏱️ مدة الفيديو (ثانية)"
@@ -196,70 +238,112 @@ jobs:
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           REMOTION_DIR: ./remotion
           TTS_ENGINE: ${{ github.event.inputs.tts_engine }}
+          ENABLE_BACKGROUND_MUSIC: ${{ github.event.inputs.enable_music }}
+          ENABLE_SFX: ${{ github.event.inputs.enable_sfx }}
         run: |
           python main.py --check || echo "⚠ Some checks failed but continuing"
 
       - name: 🎬 Generate video
         id: generate
         env:
+          # ═══════════════════════════════════════════════════════
           # 🤖 AI Keys
+          # ═══════════════════════════════════════════════════════
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           
+          # ═══════════════════════════════════════════════════════
           # 🎙️ TTS Settings
+          # ═══════════════════════════════════════════════════════
           TTS_ENGINE: ${{ github.event.inputs.tts_engine }}
           TTS_VOICE: ${{ github.event.inputs.voice }}
           
-          # 🆕 Gemini TTS
+          # Gemini TTS
           GEMINI_VOICE: ${{ github.event.inputs.gemini_voice }}
           GEMINI_STYLE: ${{ github.event.inputs.content_type }}
           GEMINI_TEMPERATURE: "1.0"
           
-          # 🎙️ ElevenLabs
+          # ElevenLabs
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
           
+          # ═══════════════════════════════════════════════════════
           # 🎬 Media Sources
+          # ═══════════════════════════════════════════════════════
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           
+          # ═══════════════════════════════════════════════════════
           # ⚙️ Video Settings
+          # ═══════════════════════════════════════════════════════
           VIDEO_WIDTH: "1080"
           VIDEO_HEIGHT: "1920"
           VIDEO_FPS: "30"
           VIDEO_TARGET_DURATION: ${{ github.event.inputs.duration }}
           VIDEO_QUALITY: ${{ github.event.inputs.quality }}
           
-          # 🎵 Music
-          ENABLE_BACKGROUND_MUSIC: "true"
-          MUSIC_VOLUME: "0.15"
+          # ═══════════════════════════════════════════════════════
+          # 🆕 🎵 Music Settings
+          # ═══════════════════════════════════════════════════════
+          ENABLE_BACKGROUND_MUSIC: ${{ github.event.inputs.enable_music }}
+          MUSIC_VOLUME: ${{ github.event.inputs.music_volume }}
+          MUSIC_DOWNLOAD_TIMEOUT: "60"
+          ENABLE_YOUTUBE_MUSIC: "false"
           
-          # 🆕🆕🆕 Audio Optimizer Settings 🆕🆕🆕
+          # ═══════════════════════════════════════════════════════
+          # 🆕 🔊 SFX Settings
+          # ═══════════════════════════════════════════════════════
+          ENABLE_SFX: ${{ github.event.inputs.enable_sfx }}
+          SFX_VOLUME: ${{ github.event.inputs.sfx_volume }}
+          MAX_SFX_PER_VIDEO: "5"
+          SFX_DOWNLOAD_TIMEOUT: "30"
+          
+          # ═══════════════════════════════════════════════════════
+          # 🎙️ Audio Optimizer Settings
+          # ═══════════════════════════════════════════════════════
           AUDIO_SPEED: ${{ github.event.inputs.audio_speed }}
           REMOVE_SILENCE: ${{ github.event.inputs.remove_silence }}
           SPEED_UP_AUDIO: "true"
           NORMALIZE_AUDIO: "true"
           ENHANCE_AUDIO: "true"
+          AUDIO_SAFE_MODE: "true"
           SILENCE_THRESHOLD_DB: "-35"
           MIN_SILENCE_DURATION: "0.4"
           KEEP_SILENCE_DURATION: "0.15"
           
+          # ═══════════════════════════════════════════════════════
+          # 🎚️ AudioFX Settings (Voice Processing)
+          # ═══════════════════════════════════════════════════════
+          LOUDNESS_PRESET: "youtube"
+          VOICE_VOLUME: "1.0"
+          VOICE_ECHO_ENABLED: "true"
+          
+          # ═══════════════════════════════════════════════════════
           # 📁 Paths
+          # ═══════════════════════════════════════════════════════
           OUTPUT_DIR: ./output
           TEMP_DIR: ./temp
+          MUSIC_DIR: ./engine/assets/music
+          SFX_DIR: ./engine/assets/sfx
           
+          # ═══════════════════════════════════════════════════════
           # 🎬 Remotion
+          # ═══════════════════════════════════════════════════════
           REMOTION_DIR: ./remotion
           USE_REMOTION: "true"
           REMOTION_COMPOSITION: "ShortsVideo"
           
+          # ═══════════════════════════════════════════════════════
           # 🎤 Whisper (Word-Level Subtitles)
+          # ═══════════════════════════════════════════════════════
           USE_WHISPER: "true"
           WHISPER_MODEL: "small"
           WHISPER_MAX_WORDS: "4"
           WHISPER_MAX_DURATION: "2.5"
           
+          # ═══════════════════════════════════════════════════════
           # 📝 Content
+          # ═══════════════════════════════════════════════════════
           DEFAULT_TOPIC: ${{ github.event.inputs.topic }}
           CONTENT_TYPE: ${{ github.event.inputs.content_type }}
         run: |
@@ -312,21 +396,33 @@ jobs:
 
             **📝 الموضوع:** ${{ github.event.inputs.topic }}
             **🎭 النوع:** ${{ github.event.inputs.content_type }}
-            **🎙️ محرك الصوت:** ${{ github.event.inputs.tts_engine }}
-            **🎤 الصوت:** ${{ github.event.inputs.tts_engine == 'gemini' && github.event.inputs.gemini_voice || github.event.inputs.voice }}
-            **⚡ سرعة الصوت:** ${{ github.event.inputs.audio_speed }}x
-            **🔇 إزالة الفراغات:** ${{ github.event.inputs.remove_silence }}
-            **⏱️ المدة:** ${{ github.event.inputs.duration }} ثانية
-            **✨ الجودة:** ${{ github.event.inputs.quality }}
-            **📦 الحجم:** ${{ steps.video_info.outputs.video_size }}
+            
+            ### 🎙️ الصوت
+            **محرك الصوت:** ${{ github.event.inputs.tts_engine }}
+            **الصوت:** ${{ github.event.inputs.tts_engine == 'gemini' && github.event.inputs.gemini_voice || github.event.inputs.voice }}
+            **سرعة الصوت:** ${{ github.event.inputs.audio_speed }}x
+            **إزالة الفراغات:** ${{ github.event.inputs.remove_silence }}
+            
+            ### 🎵 الموسيقى والمؤثرات
+            **الموسيقى:** ${{ github.event.inputs.enable_music == 'true' && '✓ مفعّلة' || '✗ معطّلة' }}
+            **مستوى الموسيقى:** ${{ github.event.inputs.music_volume }}
+            **المؤثرات الصوتية:** ${{ github.event.inputs.enable_sfx == 'true' && '✓ مفعّلة' || '✗ معطّلة' }}
+            **مستوى المؤثرات:** ${{ github.event.inputs.sfx_volume }}
+            
+            ### ⚙️ الإعدادات التقنية
+            **المدة:** ${{ github.event.inputs.duration }} ثانية
+            **الجودة:** ${{ github.event.inputs.quality }}
+            **الحجم:** ${{ steps.video_info.outputs.video_size }}
 
             ---
-            🤖 **Optimized Edition v2.1**
+            🤖 **Pro Audio Edition v2.3**
             🎬 محرك التصدير: Remotion (دعم كامل للعربية)
             🎙️ محرك الصوت: ${{ github.event.inputs.tts_engine }}
-            🎵 معالجة الصوت: AudioOptimizer (إزالة فراغات + تسريع + تطبيع)
+            🎵 معالجة الصوت: AudioOptimizer + AudioFX
             🎤 الترجمات: Whisper (TikTok style word-by-word)
-            📝 السكربت: Viral Prompt Engine v3.0
+            📝 السكربت: Value-Driven Engine v4.0
+            🎵 الموسيقى: Pixabay (مجانية للاستخدام)
+            🔊 المؤثرات: SFXManager (smart per-scene)
             🔗 رقم التشغيل: #${{ github.run_number }}
             📅 التاريخ: ${{ steps.video_info.outputs.timestamp }}
           files: |
@@ -340,21 +436,44 @@ jobs:
       - name: 📋 Workflow Summary
         if: always()
         run: |
-          echo "## 🎬 ملخص التشغيل (Optimized Edition v2.1)" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎬 ملخص التشغيل (Pro Audio Edition v2.3)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📝 المحتوى" >> $GITHUB_STEP_SUMMARY
           echo "| الخاصية | القيمة |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| 📝 الموضوع | ${{ github.event.inputs.topic }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🎭 النوع | ${{ github.event.inputs.content_type }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⏱️ المدة | ${{ github.event.inputs.duration }}s |" >> $GITHUB_STEP_SUMMARY
+          echo "| ✨ الجودة | ${{ github.event.inputs.quality }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎙️ الصوت" >> $GITHUB_STEP_SUMMARY
+          echo "| الخاصية | القيمة |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| 🎙️ محرك الصوت | ${{ github.event.inputs.tts_engine }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🎤 الصوت | ${{ github.event.inputs.tts_engine == 'gemini' && github.event.inputs.gemini_voice || github.event.inputs.voice }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ⚡ سرعة الصوت | ${{ github.event.inputs.audio_speed }}x |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔇 إزالة الفراغات | ${{ github.event.inputs.remove_silence }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ⏱️ المدة | ${{ github.event.inputs.duration }}s |" >> $GITHUB_STEP_SUMMARY
-          echo "| ✨ الجودة | ${{ github.event.inputs.quality }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🎬 المحرك | Remotion v4 |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🎤 الترجمات | Whisper (TikTok style) |" >> $GITHUB_STEP_SUMMARY
-          echo "| 📝 السكربت | Viral Engine v3.0 |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎵 الموسيقى والمؤثرات" >> $GITHUB_STEP_SUMMARY
+          echo "| الخاصية | القيمة |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎵 الموسيقى | ${{ github.event.inputs.enable_music }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎵 مستوى الموسيقى | ${{ github.event.inputs.music_volume }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔊 المؤثرات | ${{ github.event.inputs.enable_sfx }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔊 مستوى المؤثرات | ${{ github.event.inputs.sfx_volume }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎬 التقنيات المستخدمة" >> $GITHUB_STEP_SUMMARY
+          echo "| المكون | الإصدار |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎬 Renderer | Remotion v4 |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎤 Subtitles | Whisper (TikTok) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📝 Script Engine | Value-Driven v4.0 |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎵 Music | Pixabay (Free) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔊 SFX | SFXManager (Smart) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 النتيجة" >> $GITHUB_STEP_SUMMARY
+          echo "| الخاصية | القيمة |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| 🔢 رقم التشغيل | #${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ✅ الحالة | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
 
