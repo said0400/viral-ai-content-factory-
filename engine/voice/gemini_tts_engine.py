@@ -1,69 +1,62 @@
 """
-🎙️ Gemini TTS Engine — صوت احترافي مع Director's Notes متطورة
+🎙️ Gemini TTS Engine v2.0 — مع تقسيم النص الطويل
 ═══════════════════════════════════════════════════════════════
-يستخدم Gemini 3.1 Flash TTS:
-  ✓ Promo/Hype style (Premium Commercial Voice)
-  ✓ 5 أصوات احترافية
-  ✓ Director's Notes متطورة لكل نمط
-  ✓ Sound Stage Booth context
-  ✓ تحكم دقيق في الـ Pace والـ Tone
+الإصلاحات:
+  ✓ تقسيم النص الطويل لقطع
+  ✓ دمج الصوت من كل قطعة
+  ✓ Retry logic
+  ✓ معالجة أفضل للأخطاء
+  ✓ Logging تفصيلي
 
 ضع في: engine/voice/gemini_tts_engine.py
 ═══════════════════════════════════════════════════════════════
 """
 
 import os
+import time
 import struct
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 logger = logging.getLogger(__name__)
 
 
 class GeminiTTSEngine:
-    """محرك توليد الصوت الاحترافي بـ Google Gemini TTS."""
+    """محرك توليد الصوت بـ Google Gemini TTS - مع تقسيم النص."""
 
     # ─── الأصوات المتاحة ──────────────────────────────────────────
     AVAILABLE_VOICES = {
         "Achird": {
             "name": "Achird",
-            "description": "صوت ذكوري عميق وحاد - مثالي للـ Promo",
+            "description": "صوت ذكوري عميق وحاد",
             "gender": "male",
-            "style": "deep premium",
         },
         "Algenib": {
             "name": "Algenib",
-            "description": "صوت ذكوري واضح - مناسب للسرد",
+            "description": "صوت ذكوري واضح",
             "gender": "male",
-            "style": "clear narrator",
         },
         "Aoede": {
             "name": "Aoede",
-            "description": "صوت أنثوي ناعم - مناسب للقصص",
+            "description": "صوت أنثوي ناعم",
             "gender": "female",
-            "style": "soft storyteller",
         },
         "Charon": {
             "name": "Charon",
-            "description": "صوت ذكوري درامي - مناسب للمحتوى الجاد",
+            "description": "صوت ذكوري درامي",
             "gender": "male",
-            "style": "dramatic deep",
         },
         "Kore": {
             "name": "Kore",
-            "description": "صوت أنثوي قوي - مناسب للأخبار",
+            "description": "صوت أنثوي قوي",
             "gender": "female",
-            "style": "strong news",
         },
     }
 
-    # ═════════════════════════════════════════════════════════════════
-    # 🎬 Director's Notes احترافية (مطابقة لـ Sound Stage Booth)
-    # ═════════════════════════════════════════════════════════════════
+    # ─── Director's Notes ─────────────────────────────────────────
     STYLE_PRESETS = {
-        # ⭐ النمط الافتراضي - Promo/Hype (مطابق لمثالك)
         "motivational": {
             "audio_profile": "A smooth, premium commercial voice.",
             "directors_note": "Style: Promo/Hype. Pace: Natural. Accent: Neutral.",
@@ -72,8 +65,6 @@ class GeminiTTSEngine:
                 "Tone is polished, persuasive, and inviting."
             ),
         },
-        
-        # 🎓 تعليمي
         "educational": {
             "audio_profile": "A clear, authoritative narrator voice.",
             "directors_note": "Style: Documentary/Educational. Pace: Steady. Accent: Neutral.",
@@ -82,64 +73,39 @@ class GeminiTTSEngine:
                 "Tone is knowledgeable, engaging, and trustworthy."
             ),
         },
-        
-        # 📖 قصص
         "story": {
             "audio_profile": "A warm, expressive storyteller voice.",
             "directors_note": "Style: Narrative/Cinematic. Pace: Natural. Accent: Neutral.",
             "scene_context": (
-                "Cinematic storytelling. Pacing varies with emotional beats—slow during reflection, "
-                "builds during tension. Tone is warm, immersive, and captivating."
+                "Cinematic storytelling. Pacing varies with emotional beats."
             ),
         },
-        
-        # 💭 اقتباسات
         "quote": {
             "audio_profile": "A profound, contemplative voice.",
             "directors_note": "Style: Philosophical/Reflective. Pace: Slow. Accent: Neutral.",
             "scene_context": (
-                "Profound quote delivery. Slow, deliberate pacing with weight on each word. "
-                "Tone is contemplative, deep, and impactful."
+                "Profound quote delivery. Slow, deliberate pacing."
             ),
         },
-        
-        # 📢 ترويجي (نفس motivational)
         "promo": {
             "audio_profile": "A smooth, premium commercial voice.",
             "directors_note": "Style: Promo/Hype. Pace: Natural. Accent: Neutral.",
             "scene_context": (
-                "Premium commercial. Dynamic pacing—starts intrigued, ends punchy. "
-                "Tone is polished, persuasive, and inviting."
+                "Premium commercial. Dynamic pacing—starts intrigued, ends punchy."
             ),
         },
-        
-        # 🎯 محتوى تيكتوك / ريلز
         "viral": {
             "audio_profile": "A high-energy, attention-grabbing voice.",
-            "directors_note": "Style: Viral/Social Media. Pace: Fast and engaging. Accent: Neutral.",
+            "directors_note": "Style: Viral/Social Media. Pace: Fast. Accent: Neutral.",
             "scene_context": (
-                "Viral social media content. Energetic pacing that hooks attention immediately. "
-                "Tone is exciting, modern, and relatable."
+                "Viral social media content. Energetic pacing."
             ),
         },
-        
-        # 🎙️ بودكاست
-        "podcast": {
-            "audio_profile": "A conversational, warm podcast host voice.",
-            "directors_note": "Style: Conversational/Podcast. Pace: Natural conversation. Accent: Neutral.",
+        "psychological": {
+            "audio_profile": "A deep, thoughtful, mysterious voice.",
+            "directors_note": "Style: Psychological/Deep. Pace: Slow and impactful. Accent: Neutral.",
             "scene_context": (
-                "Premium podcast hosting. Natural conversational pacing. "
-                "Tone is friendly, intelligent, and engaging."
-            ),
-        },
-        
-        # 📰 أخبار
-        "news": {
-            "audio_profile": "A professional news anchor voice.",
-            "directors_note": "Style: News/Broadcast. Pace: Clear and authoritative. Accent: Neutral.",
-            "scene_context": (
-                "Professional news broadcast. Authoritative pacing with clarity. "
-                "Tone is professional, credible, and informative."
+                "Deep psychological content. Slow, weighted pacing for maximum impact."
             ),
         },
     }
@@ -147,6 +113,11 @@ class GeminiTTSEngine:
     # ─── إعدادات النموذج ──────────────────────────────────────────
     MODEL_NAME = "gemini-3.1-flash-tts-preview"
     DEFAULT_TEMPERATURE = 1.0
+    
+    # 🆕 إعدادات تقسيم النص
+    MAX_CHARS_PER_CHUNK = 500  # 500 حرف لكل قطعة (آمن)
+    MAX_RETRIES = 3             # 3 محاولات لكل قطعة
+    CHUNK_TIMEOUT = 60          # 60 ثانية لكل قطعة
 
     # ════════════════════════════════════════════════════════════════
     def __init__(self):
@@ -159,31 +130,28 @@ class GeminiTTSEngine:
                 "   أضفه في GitHub Secrets أو .env"
             )
 
-        # الإعدادات من .env
         self.voice_name = os.getenv("GEMINI_VOICE", "Achird")
         self.style_preset = os.getenv("GEMINI_STYLE", "motivational")
         self.temperature = float(os.getenv("GEMINI_TEMPERATURE", "1.0"))
+        
+        # 🆕 إعدادات قابلة للتخصيص
+        self.max_chars = int(os.getenv("GEMINI_MAX_CHARS_PER_CHUNK", str(self.MAX_CHARS_PER_CHUNK)))
+        self.max_retries = int(os.getenv("GEMINI_MAX_RETRIES", str(self.MAX_RETRIES)))
 
-        # تحقق من صحة الإعدادات
         if self.voice_name not in self.AVAILABLE_VOICES:
-            logger.warning(
-                f"⚠ صوت غير معروف '{self.voice_name}'، استخدام Achird"
-            )
+            logger.warning(f"⚠ صوت غير معروف '{self.voice_name}'، استخدام Achird")
             self.voice_name = "Achird"
 
         if self.style_preset not in self.STYLE_PRESETS:
-            logger.warning(
-                f"⚠ نمط غير معروف '{self.style_preset}'، استخدام motivational"
-            )
+            logger.warning(f"⚠ نمط غير معروف '{self.style_preset}'، استخدام motivational")
             self.style_preset = "motivational"
 
-        # تحميل client
         self._client = None
         self._init_client()
 
         logger.info(
-            f"🎙️ GeminiTTSEngine | Voice: {self.voice_name} | "
-            f"Style: {self.style_preset} | Temp: {self.temperature}"
+            f"🎙️ GeminiTTSEngine v2.0 | Voice: {self.voice_name} | "
+            f"Style: {self.style_preset} | Max chars/chunk: {self.max_chars}"
         )
 
     def _init_client(self) -> None:
@@ -201,7 +169,7 @@ class GeminiTTSEngine:
             raise RuntimeError(f"❌ فشل تهيئة Gemini client: {e}")
 
     # ════════════════════════════════════════════════════════════════
-    #                    التوليد الرئيسي
+    #                    🎯 التوليد الرئيسي مع تقسيم النص
     # ════════════════════════════════════════════════════════════════
     def generate_audio(
         self,
@@ -211,16 +179,7 @@ class GeminiTTSEngine:
         style: Optional[str] = None,
     ) -> str:
         """
-        🎯 توليد الصوت من السكربت.
-
-        Args:
-            script: السكربت الكامل
-            output_path: مسار ملف الصوت الناتج
-            voice: اسم الصوت (اختياري - يتجاوز الافتراضي)
-            style: نمط الأداء (اختياري - يتجاوز الافتراضي)
-
-        Returns:
-            مسار الملف الناتج
+        🎯 توليد الصوت مع تقسيم النص الطويل تلقائياً.
         """
         # استخراج النص
         full_text = self._extract_text(script)
@@ -228,7 +187,6 @@ class GeminiTTSEngine:
         if not full_text.strip():
             raise ValueError("❌ لا يوجد نص للتحويل")
 
-        # استخدم القيم المرسلة أو الافتراضية
         voice_name = voice or self.voice_name
         style_preset = style or self.style_preset
 
@@ -237,69 +195,145 @@ class GeminiTTSEngine:
             f"Style: {style_preset} | Length: {len(full_text)} chars"
         )
 
-        # التأكد من وجود مجلد الإخراج
+        # 🆕 تقسيم النص لقطع
+        chunks = self._split_text_into_chunks(full_text)
+        logger.info(f"   📦 تقسيم النص إلى {len(chunks)} قطعة")
+
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-        # توليد الصوت
-        try:
-            audio_data = self._generate_speech(
-                text=full_text,
+        # 🆕 توليد كل قطعة وجمعها
+        all_audio_data = bytearray()
+        successful_chunks = 0
+
+        for i, chunk_text in enumerate(chunks, 1):
+            logger.info(f"   🎤 معالجة قطعة {i}/{len(chunks)} ({len(chunk_text)} حرف)")
+            
+            chunk_audio = self._generate_chunk_with_retry(
+                text=chunk_text,
                 voice_name=voice_name,
                 style_preset=style_preset,
+                chunk_num=i,
+                total_chunks=len(chunks),
             )
+            
+            if chunk_audio:
+                all_audio_data.extend(chunk_audio)
+                successful_chunks += 1
+                logger.info(f"   ✓ قطعة {i}/{len(chunks)} ({len(chunk_audio)/1024:.1f} KB)")
+            else:
+                logger.warning(f"   ⚠ فشلت قطعة {i}/{len(chunks)}")
 
-            # حفظ الملف
-            self._save_audio(audio_data, output_path)
+        if successful_chunks == 0:
+            raise RuntimeError("❌ فشلت كل القطع!")
 
-            # عرض المعلومات
-            file_size_kb = Path(output_path).stat().st_size / 1024
-            logger.info(f"✓ تم حفظ الصوت: {output_path} ({file_size_kb:.1f} KB)")
+        logger.info(
+            f"   ✅ تم توليد {successful_chunks}/{len(chunks)} قطعة "
+            f"({len(all_audio_data)/1024:.1f} KB)"
+        )
 
-            return output_path
+        # حفظ الملف
+        self._save_audio(bytes(all_audio_data), output_path)
 
-        except Exception as e:
-            logger.error(f"❌ فشل توليد الصوت: {e}")
-            raise
+        file_size_kb = Path(output_path).stat().st_size / 1024
+        logger.info(f"✓ تم حفظ الصوت: {output_path} ({file_size_kb:.1f} KB)")
 
-    def _extract_text(self, script: dict) -> str:
-        """استخراج النص الكامل من السكربت."""
-        # 1. جرب full_text أولاً
-        full_text = script.get("full_text", "").strip()
-        if full_text:
-            return full_text
-
-        # 2. ثم جمّع من المشاهد
-        scenes = script.get("scenes", [])
-        if scenes:
-            texts = [s.get("text", "").strip() for s in scenes if s.get("text")]
-            return " ".join(texts)
-
-        # 3. ثم hook
-        return script.get("hook", "")
+        return output_path
 
     # ════════════════════════════════════════════════════════════════
-    #                    🎬 توليد الصوت بـ Director's Note
+    #                    🆕 تقسيم النص الذكي
     # ════════════════════════════════════════════════════════════════
-    def _generate_speech(
+    def _split_text_into_chunks(self, text: str) -> List[str]:
+        """
+        🆕 تقسيم النص لقطع صغيرة عند نهايات الجمل.
+        """
+        if len(text) <= self.max_chars:
+            return [text]
+
+        chunks = []
+        # القواطع المنطقية (مرتبة حسب الأولوية)
+        delimiters = ['. ', '! ', '? ', '... ', '،', '؛', '\n', ' ']
+        
+        remaining = text
+        while remaining:
+            if len(remaining) <= self.max_chars:
+                chunks.append(remaining.strip())
+                break
+            
+            # ابحث عن أفضل نقطة قطع
+            best_pos = -1
+            chunk_window = remaining[:self.max_chars]
+            
+            for delim in delimiters:
+                pos = chunk_window.rfind(delim)
+                if pos > self.max_chars * 0.5:  # على الأقل 50% من الحد
+                    best_pos = pos + len(delim)
+                    break
+            
+            if best_pos == -1:
+                # لم نجد قاطع منطقي، اقطع عند المسافة
+                best_pos = chunk_window.rfind(' ')
+                if best_pos == -1:
+                    best_pos = self.max_chars
+            
+            chunks.append(remaining[:best_pos].strip())
+            remaining = remaining[best_pos:].strip()
+        
+        return [c for c in chunks if c]  # إزالة القطع الفارغة
+
+    # ════════════════════════════════════════════════════════════════
+    #                    🆕 توليد قطعة مع Retry
+    # ════════════════════════════════════════════════════════════════
+    def _generate_chunk_with_retry(
+        self,
+        text: str,
+        voice_name: str,
+        style_preset: str,
+        chunk_num: int,
+        total_chunks: int,
+    ) -> Optional[bytes]:
+        """🆕 توليد قطعة مع إعادة المحاولة عند الفشل."""
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                if attempt > 1:
+                    logger.info(f"      🔄 إعادة محاولة {attempt}/{self.max_retries}...")
+                    time.sleep(2 * attempt)  # exponential backoff
+                
+                audio_data = self._generate_speech_chunk(
+                    text=text,
+                    voice_name=voice_name,
+                    style_preset=style_preset,
+                )
+                
+                if audio_data and len(audio_data) > 1000:  # على الأقل 1 KB
+                    return audio_data
+                else:
+                    logger.warning(f"      ⚠ قطعة فارغة (محاولة {attempt})")
+                    
+            except Exception as e:
+                logger.warning(f"      ⚠ فشل (محاولة {attempt}): {str(e)[:100]}")
+                if attempt == self.max_retries:
+                    logger.error(f"      ❌ فشلت كل المحاولات")
+        
+        return None
+
+    # ════════════════════════════════════════════════════════════════
+    #                    توليد قطعة واحدة بـ Gemini
+    # ════════════════════════════════════════════════════════════════
+    def _generate_speech_chunk(
         self,
         text: str,
         voice_name: str,
         style_preset: str,
     ) -> bytes:
-        """توليد الصوت بـ Gemini API مع Director's Note احترافية."""
+        """توليد الصوت لقطعة نصية واحدة."""
         from google.genai import types
 
-        # 🎯 بناء الـ prompt المطابق تماماً للنمط الاحترافي
         style_config = self.STYLE_PRESETS.get(
             style_preset, self.STYLE_PRESETS["motivational"]
         )
 
         prompt = self._build_professional_prompt(text, style_config)
 
-        # طباعة الـ prompt للتشخيص
-        logger.debug(f"📝 Prompt:\n{prompt[:300]}...")
-
-        # إعداد الـ contents
         contents = [
             types.Content(
                 role="user",
@@ -307,7 +341,6 @@ class GeminiTTSEngine:
             ),
         ]
 
-        # إعدادات التوليد
         generate_content_config = types.GenerateContentConfig(
             temperature=self.temperature,
             response_modalities=["audio"],
@@ -320,12 +353,9 @@ class GeminiTTSEngine:
             ),
         )
 
-        # توليد الصوت (streaming)
-        logger.info("   ⏳ جاري التوليد...")
-
+        # توليد streaming
         audio_chunks = []
         mime_type = None
-        chunk_count = 0
 
         for chunk in self._client.models.generate_content_stream(
             model=self.MODEL_NAME,
@@ -340,42 +370,44 @@ class GeminiTTSEngine:
                 audio_chunks.append(inline_data.data)
                 if mime_type is None:
                     mime_type = inline_data.mime_type
-                chunk_count += 1
-                
-                # طباعة التقدم كل 5 chunks
-                if chunk_count % 5 == 0:
-                    logger.info(f"   📥 استلام... ({chunk_count} chunks)")
-                    
-            elif chunk.text:
-                logger.debug(f"   📝 {chunk.text}")
 
         if not audio_chunks:
-            raise RuntimeError("❌ لم يتم استلام أي بيانات صوتية")
+            raise RuntimeError("لم يتم استلام أي بيانات صوتية")
 
-        # دمج كل القطع
-        audio_data = b"".join(audio_chunks)
+        # دمج
+        raw_audio = b"".join(audio_chunks)
 
-        # تحويل إلى WAV إذا كان raw PCM
+        # تحويل إلى WAV
         file_extension = mimetypes.guess_extension(mime_type) if mime_type else None
         if file_extension is None or "wav" not in (file_extension or ""):
-            audio_data = self._convert_to_wav(audio_data, mime_type)
+            raw_audio = self._convert_to_wav(raw_audio, mime_type)
 
-        logger.info(
-            f"   ✓ تم استلام {chunk_count} chunks "
-            f"({len(audio_data) / 1024:.1f} KB)"
-        )
-
-        return audio_data
+        return raw_audio
 
     # ════════════════════════════════════════════════════════════════
-    # 🎯 🎯 🎯 الـ Prompt الاحترافي (مطابق تماماً لمثالك) 🎯 🎯 🎯
+    #                    استخراج النص
+    # ════════════════════════════════════════════════════════════════
+    def _extract_text(self, script: dict) -> str:
+        """استخراج النص الكامل من السكربت."""
+        # 1. جرب full_text
+        full_text = script.get("full_text", "").strip()
+        if full_text:
+            return full_text
+
+        # 2. ثم scenes
+        scenes = script.get("scenes", [])
+        if scenes:
+            texts = [s.get("text", "").strip() for s in scenes if s.get("text")]
+            return " ".join(texts)
+
+        # 3. ثم hook
+        return script.get("hook", "")
+
+    # ════════════════════════════════════════════════════════════════
+    #                    Prompt احترافي
     # ════════════════════════════════════════════════════════════════
     def _build_professional_prompt(self, text: str, style_config: Dict) -> str:
-        """
-        🎯 بناء الـ prompt الاحترافي بنفس صيغة Sound Stage Booth.
-        
-        مطابق تماماً للـ prompt الذي يعطي أفضل نتائج صوتية.
-        """
+        """بناء الـ prompt الاحترافي."""
         return f"""Read the following transcript based on the audio profile and director's note.
 
 # Audio Profile
@@ -398,42 +430,121 @@ The Sound Stage Booth.
     # ════════════════════════════════════════════════════════════════
     def _save_audio(self, audio_data: bytes, output_path: str) -> None:
         """حفظ بيانات الصوت إلى ملف."""
-        # تحديد الامتداد
         original_path = output_path
         wants_mp3 = output_path.endswith(".mp3")
         
-        # حفظ كـ WAV أولاً
         wav_path = output_path.replace(".mp3", ".wav") if wants_mp3 else output_path
         if not wav_path.endswith(".wav"):
             wav_path += ".wav"
 
+        # 🆕 إذا كان عدة قطع WAV، نحتاج معالجة خاصة
+        # كل قطعة لها header، نحتاج دمجها بشكل صحيح
+        merged_audio = self._merge_wav_chunks(audio_data)
+        
         with open(wav_path, "wb") as f:
-            f.write(audio_data)
+            f.write(merged_audio)
 
-        # تحويل إلى MP3 إذا مطلوب
         if wants_mp3:
             self._convert_wav_to_mp3(wav_path, original_path)
-            # حذف الـ WAV المؤقت
             try:
                 Path(wav_path).unlink(missing_ok=True)
             except Exception:
                 pass
 
+    def _merge_wav_chunks(self, audio_data: bytes) -> bytes:
+        """
+        🆕 دمج عدة قطع WAV في ملف واحد صحيح.
+        كل قطعة WAV لها header منفصل، نحتاج فصلها ودمج الـ PCM data فقط.
+        """
+        try:
+            # ابحث عن جميع headers الـ RIFF
+            chunks_data = []
+            sample_rate = 24000
+            bits_per_sample = 16
+            num_channels = 1
+            
+            pos = 0
+            while pos < len(audio_data):
+                # ابحث عن RIFF header
+                if audio_data[pos:pos+4] == b'RIFF':
+                    # تخطي header (44 bytes)
+                    # قراءة sample_rate من position 24
+                    if pos + 28 <= len(audio_data):
+                        sample_rate = int.from_bytes(audio_data[pos+24:pos+28], 'little')
+                    if pos + 36 <= len(audio_data):
+                        bits_per_sample = int.from_bytes(audio_data[pos+34:pos+36], 'little')
+                    
+                    # ابحث عن "data" chunk
+                    data_pos = audio_data.find(b'data', pos)
+                    if data_pos == -1:
+                        break
+                    
+                    # حجم البيانات
+                    data_size = int.from_bytes(
+                        audio_data[data_pos+4:data_pos+8], 'little'
+                    )
+                    
+                    # استخرج PCM data
+                    pcm_start = data_pos + 8
+                    pcm_end = pcm_start + data_size
+                    
+                    if pcm_end <= len(audio_data):
+                        chunks_data.append(audio_data[pcm_start:pcm_end])
+                    
+                    pos = pcm_end
+                else:
+                    pos += 1
+            
+            if not chunks_data:
+                # لم نجد WAV headers، نفترض أنها PCM raw
+                return audio_data
+            
+            # دمج كل PCM data
+            merged_pcm = b''.join(chunks_data)
+            
+            # بناء WAV header جديد
+            data_size = len(merged_pcm)
+            bytes_per_sample = bits_per_sample // 8
+            block_align = num_channels * bytes_per_sample
+            byte_rate = sample_rate * block_align
+            chunk_size = 36 + data_size
+
+            header = struct.pack(
+                "<4sI4s4sIHHIIHH4sI",
+                b"RIFF",
+                chunk_size,
+                b"WAVE",
+                b"fmt ",
+                16,
+                1,
+                num_channels,
+                sample_rate,
+                byte_rate,
+                block_align,
+                bits_per_sample,
+                b"data",
+                data_size,
+            )
+            
+            return header + merged_pcm
+            
+        except Exception as e:
+            logger.warning(f"⚠ فشل دمج WAV chunks: {e}, استخدام البيانات كما هي")
+            return audio_data
+
     def _convert_wav_to_mp3(self, wav_path: str, mp3_path: str) -> None:
-        """تحويل WAV إلى MP3 باستخدام pydub."""
+        """تحويل WAV إلى MP3."""
         try:
             from pydub import AudioSegment
             audio = AudioSegment.from_wav(wav_path)
             audio.export(mp3_path, format="mp3", bitrate="192k")
-            logger.debug(f"✓ تم التحويل إلى MP3: {mp3_path}")
         except Exception as e:
             logger.warning(f"⚠ فشل التحويل إلى MP3: {e}")
-            # نسخ WAV كـ fallback
             import shutil
             shutil.copy(wav_path, mp3_path)
 
     def _convert_to_wav(self, audio_data: bytes, mime_type: str) -> bytes:
-        """تحويل raw PCM إلى WAV (مطابق لمثالك)."""
+        """تحويل raw PCM إلى WAV."""
         parameters = self._parse_audio_mime_type(mime_type)
         bits_per_sample = parameters["bits_per_sample"]
         sample_rate = parameters["rate"]
@@ -446,24 +557,15 @@ The Sound Stage Booth.
 
         header = struct.pack(
             "<4sI4s4sIHHIIHH4sI",
-            b"RIFF",          # ChunkID
-            chunk_size,       # ChunkSize
-            b"WAVE",          # Format
-            b"fmt ",          # Subchunk1ID
-            16,               # Subchunk1Size (16 for PCM)
-            1,                # AudioFormat (1 for PCM)
-            num_channels,     # NumChannels
-            sample_rate,      # SampleRate
-            byte_rate,        # ByteRate
-            block_align,      # BlockAlign
-            bits_per_sample,  # BitsPerSample
-            b"data",          # Subchunk2ID
-            data_size         # Subchunk2Size
+            b"RIFF", chunk_size, b"WAVE", b"fmt ",
+            16, 1, num_channels, sample_rate,
+            byte_rate, block_align, bits_per_sample,
+            b"data", data_size,
         )
         return header + audio_data
 
     def _parse_audio_mime_type(self, mime_type: str) -> Dict[str, int]:
-        """تحليل mime type (مطابق لمثالك)."""
+        """تحليل mime type."""
         bits_per_sample = 16
         rate = 24000
 
@@ -475,8 +577,7 @@ The Sound Stage Booth.
             param = param.strip()
             if param.lower().startswith("rate="):
                 try:
-                    rate_str = param.split("=", 1)[1]
-                    rate = int(rate_str)
+                    rate = int(param.split("=", 1)[1])
                 except (ValueError, IndexError):
                     pass
             elif param.startswith("audio/L"):
@@ -491,11 +592,9 @@ The Sound Stage Booth.
     #                    دوال مساعدة
     # ════════════════════════════════════════════════════════════════
     def list_voices(self) -> Dict:
-        """قائمة الأصوات المتاحة."""
         return self.AVAILABLE_VOICES
 
     def list_styles(self) -> Dict:
-        """قائمة الأنماط المتاحة."""
         return self.STYLE_PRESETS
 
 
@@ -505,9 +604,20 @@ The Sound Stage Booth.
 if __name__ == "__main__":
     import sys
 
-    # اختبار بسيط بنفس مثالك
+    # اختبار بنص طويل
     test_script = {
-        "full_text": "السلام عليكم",
+        "full_text": (
+            "السلام عليكم ورحمة الله وبركاته. "
+            "اليوم سنتحدث عن السر العلمي للنجاح في الحياة. "
+            "هل تعلم أن 95% من الناس يفشلون لسبب واحد فقط؟ "
+            "إنهم يجهلون قاعدة بسيطة جداً. "
+            "دراسة من جامعة هارفارد على آلاف الناجحين "
+            "كشفت سراً مذهلاً. "
+            "كل من حقق نجاحاً عظيماً... "
+            "كان يفعل هذا الأمر بشكل يومي. "
+            "إنها قاعدة الـ 1% للتحسن المستمر. "
+            "ابدأ اليوم... وستلاحظ الفرق خلال 90 يوم!"
+        ),
     }
 
     output_file = sys.argv[1] if len(sys.argv) > 1 else "test_gemini.wav"
@@ -515,13 +625,11 @@ if __name__ == "__main__":
     try:
         engine = GeminiTTSEngine()
 
-        print("\n📦 الأصوات المتاحة:")
-        for name, info in engine.list_voices().items():
-            print(f"   • {name}: {info['description']}")
-
-        print(f"\n🎬 الأنماط المتاحة:")
-        for name in engine.list_styles().keys():
-            print(f"   • {name}")
+        print(f"\n📊 معلومات:")
+        print(f"   • Voice: {engine.voice_name}")
+        print(f"   • Style: {engine.style_preset}")
+        print(f"   • Max chars/chunk: {engine.max_chars}")
+        print(f"   • Text length: {len(test_script['full_text'])} chars")
 
         print(f"\n🎙️ توليد صوت تجريبي → {output_file}")
         engine.generate_audio(test_script, output_file)
