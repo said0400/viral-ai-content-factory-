@@ -1,7 +1,8 @@
 """
-🎙️ Gemini TTS Engine v2.0 — مع تقسيم النص الطويل
+🎙️ Gemini TTS Engine v2.1 — مع تقسيم النص الطويل + إصلاح _extract_text
 ═══════════════════════════════════════════════════════════════
-الإصلاحات:
+الإصلاحات v2.1:
+  ✓ _extract_text يعطي الأولوية للـ scenes (الأكثر موثوقية)
   ✓ تقسيم النص الطويل لقطع
   ✓ دمج الصوت من كل قطعة
   ✓ Retry logic
@@ -115,9 +116,9 @@ class GeminiTTSEngine:
     DEFAULT_TEMPERATURE = 1.0
     
     # 🆕 إعدادات تقسيم النص
-    MAX_CHARS_PER_CHUNK = 500  # 500 حرف لكل قطعة (آمن)
-    MAX_RETRIES = 3             # 3 محاولات لكل قطعة
-    CHUNK_TIMEOUT = 60          # 60 ثانية لكل قطعة
+    MAX_CHARS_PER_CHUNK = 500
+    MAX_RETRIES = 3
+    CHUNK_TIMEOUT = 60
 
     # ════════════════════════════════════════════════════════════════
     def __init__(self):
@@ -134,7 +135,6 @@ class GeminiTTSEngine:
         self.style_preset = os.getenv("GEMINI_STYLE", "motivational")
         self.temperature = float(os.getenv("GEMINI_TEMPERATURE", "1.0"))
         
-        # 🆕 إعدادات قابلة للتخصيص
         self.max_chars = int(os.getenv("GEMINI_MAX_CHARS_PER_CHUNK", str(self.MAX_CHARS_PER_CHUNK)))
         self.max_retries = int(os.getenv("GEMINI_MAX_RETRIES", str(self.MAX_RETRIES)))
 
@@ -150,7 +150,7 @@ class GeminiTTSEngine:
         self._init_client()
 
         logger.info(
-            f"🎙️ GeminiTTSEngine v2.0 | Voice: {self.voice_name} | "
+            f"🎙️ GeminiTTSEngine v2.1 | Voice: {self.voice_name} | "
             f"Style: {self.style_preset} | Max chars/chunk: {self.max_chars}"
         )
 
@@ -169,7 +169,7 @@ class GeminiTTSEngine:
             raise RuntimeError(f"❌ فشل تهيئة Gemini client: {e}")
 
     # ════════════════════════════════════════════════════════════════
-    #                    🎯 التوليد الرئيسي مع تقسيم النص
+    #                    🎯 التوليد الرئيسي
     # ════════════════════════════════════════════════════════════════
     def generate_audio(
         self,
@@ -178,9 +178,7 @@ class GeminiTTSEngine:
         voice: Optional[str] = None,
         style: Optional[str] = None,
     ) -> str:
-        """
-        🎯 توليد الصوت مع تقسيم النص الطويل تلقائياً.
-        """
+        """🎯 توليد الصوت مع تقسيم النص الطويل تلقائياً."""
         # استخراج النص
         full_text = self._extract_text(script)
 
@@ -195,13 +193,13 @@ class GeminiTTSEngine:
             f"Style: {style_preset} | Length: {len(full_text)} chars"
         )
 
-        # 🆕 تقسيم النص لقطع
+        # تقسيم النص لقطع
         chunks = self._split_text_into_chunks(full_text)
         logger.info(f"   📦 تقسيم النص إلى {len(chunks)} قطعة")
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-        # 🆕 توليد كل قطعة وجمعها
+        # توليد كل قطعة
         all_audio_data = bytearray()
         successful_chunks = 0
 
@@ -240,17 +238,63 @@ class GeminiTTSEngine:
         return output_path
 
     # ════════════════════════════════════════════════════════════════
+    #              🆕🆕🆕 إصلاح _extract_text (v2.1)
+    # ════════════════════════════════════════════════════════════════
+    def _extract_text(self, script: dict) -> str:
+        """
+        🆕 استخراج النص الكامل - يعطي الأولوية للـ scenes (الأكثر موثوقية).
+        
+        الترتيب الجديد:
+        1. ⭐ scenes (الأكثر موثوقية وكاملة)
+        2. full_text (إذا > 50 حرف)
+        3. hook (آخر محاولة، مع تحذير)
+        """
+        
+        # 🆕 1. ابدأ بـ scenes (الأكثر موثوقية وكاملة)
+        scenes = script.get("scenes", [])
+        if scenes:
+            texts = []
+            for scene in scenes:
+                scene_text = scene.get("text", "").strip()
+                if scene_text:
+                    texts.append(scene_text)
+            
+            if texts:
+                full_from_scenes = " ".join(texts)
+                logger.info(
+                    f"   📝 النص من scenes: {len(full_from_scenes)} حرف "
+                    f"({len(texts)} مشاهد)"
+                )
+                return full_from_scenes
+
+        # 2. fallback: full_text (إذا كان نص حقيقي)
+        full_text = script.get("full_text", "").strip()
+        if full_text and len(full_text) > 50:
+            logger.info(f"   📝 النص من full_text: {len(full_text)} حرف")
+            return full_text
+
+        # 3. آخر محاولة: hook (مع تحذير)
+        hook = script.get("hook", "").strip()
+        if hook:
+            logger.warning(
+                f"   ⚠ استخدام Hook فقط: {len(hook)} حرف "
+                f"(scenes و full_text فارغة!)"
+            )
+            return hook
+
+        # 4. لا يوجد نص
+        logger.error("   ❌ لا يوجد نص في السكربت!")
+        return ""
+
+    # ════════════════════════════════════════════════════════════════
     #                    🆕 تقسيم النص الذكي
     # ════════════════════════════════════════════════════════════════
     def _split_text_into_chunks(self, text: str) -> List[str]:
-        """
-        🆕 تقسيم النص لقطع صغيرة عند نهايات الجمل.
-        """
+        """🆕 تقسيم النص لقطع صغيرة عند نهايات الجمل."""
         if len(text) <= self.max_chars:
             return [text]
 
         chunks = []
-        # القواطع المنطقية (مرتبة حسب الأولوية)
         delimiters = ['. ', '! ', '? ', '... ', '،', '؛', '\n', ' ']
         
         remaining = text
@@ -259,18 +303,16 @@ class GeminiTTSEngine:
                 chunks.append(remaining.strip())
                 break
             
-            # ابحث عن أفضل نقطة قطع
             best_pos = -1
             chunk_window = remaining[:self.max_chars]
             
             for delim in delimiters:
                 pos = chunk_window.rfind(delim)
-                if pos > self.max_chars * 0.5:  # على الأقل 50% من الحد
+                if pos > self.max_chars * 0.5:
                     best_pos = pos + len(delim)
                     break
             
             if best_pos == -1:
-                # لم نجد قاطع منطقي، اقطع عند المسافة
                 best_pos = chunk_window.rfind(' ')
                 if best_pos == -1:
                     best_pos = self.max_chars
@@ -278,7 +320,7 @@ class GeminiTTSEngine:
             chunks.append(remaining[:best_pos].strip())
             remaining = remaining[best_pos:].strip()
         
-        return [c for c in chunks if c]  # إزالة القطع الفارغة
+        return [c for c in chunks if c]
 
     # ════════════════════════════════════════════════════════════════
     #                    🆕 توليد قطعة مع Retry
@@ -296,7 +338,7 @@ class GeminiTTSEngine:
             try:
                 if attempt > 1:
                     logger.info(f"      🔄 إعادة محاولة {attempt}/{self.max_retries}...")
-                    time.sleep(2 * attempt)  # exponential backoff
+                    time.sleep(2 * attempt)
                 
                 audio_data = self._generate_speech_chunk(
                     text=text,
@@ -304,7 +346,7 @@ class GeminiTTSEngine:
                     style_preset=style_preset,
                 )
                 
-                if audio_data and len(audio_data) > 1000:  # على الأقل 1 KB
+                if audio_data and len(audio_data) > 1000:
                     return audio_data
                 else:
                     logger.warning(f"      ⚠ قطعة فارغة (محاولة {attempt})")
@@ -353,7 +395,6 @@ class GeminiTTSEngine:
             ),
         )
 
-        # توليد streaming
         audio_chunks = []
         mime_type = None
 
@@ -374,34 +415,13 @@ class GeminiTTSEngine:
         if not audio_chunks:
             raise RuntimeError("لم يتم استلام أي بيانات صوتية")
 
-        # دمج
         raw_audio = b"".join(audio_chunks)
 
-        # تحويل إلى WAV
         file_extension = mimetypes.guess_extension(mime_type) if mime_type else None
         if file_extension is None or "wav" not in (file_extension or ""):
             raw_audio = self._convert_to_wav(raw_audio, mime_type)
 
         return raw_audio
-
-    # ════════════════════════════════════════════════════════════════
-    #                    استخراج النص
-    # ════════════════════════════════════════════════════════════════
-    def _extract_text(self, script: dict) -> str:
-        """استخراج النص الكامل من السكربت."""
-        # 1. جرب full_text
-        full_text = script.get("full_text", "").strip()
-        if full_text:
-            return full_text
-
-        # 2. ثم scenes
-        scenes = script.get("scenes", [])
-        if scenes:
-            texts = [s.get("text", "").strip() for s in scenes if s.get("text")]
-            return " ".join(texts)
-
-        # 3. ثم hook
-        return script.get("hook", "")
 
     # ════════════════════════════════════════════════════════════════
     #                    Prompt احترافي
@@ -437,8 +457,6 @@ The Sound Stage Booth.
         if not wav_path.endswith(".wav"):
             wav_path += ".wav"
 
-        # 🆕 إذا كان عدة قطع WAV، نحتاج معالجة خاصة
-        # كل قطعة لها header، نحتاج دمجها بشكل صحيح
         merged_audio = self._merge_wav_chunks(audio_data)
         
         with open(wav_path, "wb") as f:
@@ -452,12 +470,8 @@ The Sound Stage Booth.
                 pass
 
     def _merge_wav_chunks(self, audio_data: bytes) -> bytes:
-        """
-        🆕 دمج عدة قطع WAV في ملف واحد صحيح.
-        كل قطعة WAV لها header منفصل، نحتاج فصلها ودمج الـ PCM data فقط.
-        """
+        """🆕 دمج عدة قطع WAV في ملف واحد صحيح."""
         try:
-            # ابحث عن جميع headers الـ RIFF
             chunks_data = []
             sample_rate = 24000
             bits_per_sample = 16
@@ -465,26 +479,20 @@ The Sound Stage Booth.
             
             pos = 0
             while pos < len(audio_data):
-                # ابحث عن RIFF header
                 if audio_data[pos:pos+4] == b'RIFF':
-                    # تخطي header (44 bytes)
-                    # قراءة sample_rate من position 24
                     if pos + 28 <= len(audio_data):
                         sample_rate = int.from_bytes(audio_data[pos+24:pos+28], 'little')
                     if pos + 36 <= len(audio_data):
                         bits_per_sample = int.from_bytes(audio_data[pos+34:pos+36], 'little')
                     
-                    # ابحث عن "data" chunk
                     data_pos = audio_data.find(b'data', pos)
                     if data_pos == -1:
                         break
                     
-                    # حجم البيانات
                     data_size = int.from_bytes(
                         audio_data[data_pos+4:data_pos+8], 'little'
                     )
                     
-                    # استخرج PCM data
                     pcm_start = data_pos + 8
                     pcm_end = pcm_start + data_size
                     
@@ -496,13 +504,10 @@ The Sound Stage Booth.
                     pos += 1
             
             if not chunks_data:
-                # لم نجد WAV headers، نفترض أنها PCM raw
                 return audio_data
             
-            # دمج كل PCM data
             merged_pcm = b''.join(chunks_data)
             
-            # بناء WAV header جديد
             data_size = len(merged_pcm)
             bytes_per_sample = bits_per_sample // 8
             block_align = num_channels * bytes_per_sample
@@ -604,20 +609,21 @@ The Sound Stage Booth.
 if __name__ == "__main__":
     import sys
 
-    # اختبار بنص طويل
+    # اختبار بسيناريو scenes (مثل الواقع)
     test_script = {
-        "full_text": (
-            "السلام عليكم ورحمة الله وبركاته. "
-            "اليوم سنتحدث عن السر العلمي للنجاح في الحياة. "
-            "هل تعلم أن 95% من الناس يفشلون لسبب واحد فقط؟ "
-            "إنهم يجهلون قاعدة بسيطة جداً. "
-            "دراسة من جامعة هارفارد على آلاف الناجحين "
-            "كشفت سراً مذهلاً. "
-            "كل من حقق نجاحاً عظيماً... "
-            "كان يفعل هذا الأمر بشكل يومي. "
-            "إنها قاعدة الـ 1% للتحسن المستمر. "
-            "ابدأ اليوم... وستلاحظ الفرق خلال 90 يوم!"
-        ),
+        "hook": "اكتشف قاعدة الـ 7 ثوانٍ...",
+        "scenes": [
+            {"text": "اكتشف قاعدة الـ 7 ثوانٍ التي تغير طريقة تفاعلك مع الناس."},
+            {"text": "خلال 7 ثوانٍ، يحكم الناس عليك للأبد."},
+            {"text": "هذا ما تقوله الأبحاث النفسية الحديثة."},
+            {"text": "السر هو في 3 عناصر: نظرة العينين، نبرة الصوت، والابتسامة."},
+            {"text": "ابدأ تطبيق هذه القاعدة اليوم..."},
+            {"text": "وستلاحظ الفرق فوراً في علاقاتك!"},
+            {"text": "النجاح في التواصل يبدأ من ثوانيك الأولى."},
+            {"text": "احفظ هذه القاعدة جيداً."},
+            {"text": "وشاركها مع من تحب!"},
+        ],
+        "full_text": "",  # فارغ عمداً للاختبار
     }
 
     output_file = sys.argv[1] if len(sys.argv) > 1 else "test_gemini.wav"
@@ -629,7 +635,8 @@ if __name__ == "__main__":
         print(f"   • Voice: {engine.voice_name}")
         print(f"   • Style: {engine.style_preset}")
         print(f"   • Max chars/chunk: {engine.max_chars}")
-        print(f"   • Text length: {len(test_script['full_text'])} chars")
+        print(f"   • Scenes: {len(test_script['scenes'])}")
+        print(f"   • Full_text: '{test_script['full_text']}'")
 
         print(f"\n🎙️ توليد صوت تجريبي → {output_file}")
         engine.generate_audio(test_script, output_file)
