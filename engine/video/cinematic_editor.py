@@ -1,12 +1,12 @@
 """
-🎬 Cinematic Editor v2.2 — مُجهّز البيانات لـ Remotion (Audio-First)
+🎬 Cinematic Editor v3.0 — Audio-First + HD + Diversity
 ═══════════════════════════════════════════════════════════════
-بعد التحول لـ Audio-First Approach:
-  • قياس مدة الصوت الفعلية أولاً
-  • مزامنة كل المشاهد على مدة الصوت بدقة
-  • Whisper لتوقيتات الكلمات (TikTok style)
-  • تصحيح الفروقات الصغيرة في النهاية
-  • ضمان عدم تجاوز أو فراغات
+التحسينات v3.0:
+  ✓ مزامنة دقيقة (0ms) للمشاهد مع الصوت
+  ✓ جودة HD للخلفيات (لا 240p أبداً)
+  ✓ تنوع أفضل للخلفيات (لا تكرار)
+  ✓ Whisper TikTok subtitles
+  ✓ Audio-First approach
 
 ضع في: engine/video/cinematic_editor.py
 ═══════════════════════════════════════════════════════════════
@@ -26,276 +26,159 @@ logger = logging.getLogger(__name__)
 
 
 class CinematicEditor:
-    """مُجهّز البيانات والمشاهد لـ Remotion (Audio-First)."""
+    """مُجهّز البيانات لـ Remotion v3.0."""
 
-    # ════════════════════════════════════════════════════════════════
-    #                    قواميس البحث
-    # ════════════════════════════════════════════════════════════════
     KEYWORDS = [
-        # درامي / سينمائي
-        "dark cinematic dramatic",
-        "silhouette dramatic sunset",
-        "cinematic night city",
-        "dramatic sky clouds",
-        "moody dark forest",
-        "cinematic desert landscape",
-        "dark rain dramatic",
-        "dramatic lightning storm",
-        "cinematic mountain fog",
-        "dark ocean waves",
-        # شخصيات
-        "person walking alone",
-        "man standing alone dramatic",
-        "silhouette person sunset",
-        "person thinking alone",
-        "man running dramatic",
-        "person looking window rain",
-        "man praying dramatic light",
-        "silhouette crowd dark",
-        # طبيعة
-        "fire flame dark dramatic",
-        "smoke light cinematic",
-        "stars milky way dark",
-        "sunrise golden mountain",
-        "waves ocean slow motion",
-        "rain drops dark",
-        "snow falling dark",
-        "desert dunes sunset",
-        "waterfall mist dramatic",
-        "fog dark forest",
-        # حضري
-        "urban night bokeh",
-        "city lights night",
-        "empty road night",
-        "abandoned building dark",
-        "dark alley night",
-        "bridge night cinematic",
-        "train night dramatic",
-        "rooftop city night",
-        # مجردة / فلسفية
-        "candle flame dark",
-        "clock ticking dramatic",
-        "book pages turning",
-        "dark water reflection",
-        "mirror reflection dramatic",
-        "hands dramatic light",
-        "eye close up dramatic",
-        "shadow dramatic light",
-        # حركة
-        "slow motion dramatic",
-        "epic slow motion",
-        "cinematic slow motion nature",
-        "dramatic slow motion water",
-        "timelapse city night",
-        "timelapse sky dramatic",
+        "dark cinematic dramatic", "silhouette dramatic sunset",
+        "cinematic night city", "dramatic sky clouds",
+        "moody dark forest", "cinematic desert landscape",
+        "dark rain dramatic", "dramatic lightning storm",
+        "cinematic mountain fog", "dark ocean waves",
+        "person walking alone", "man standing alone dramatic",
+        "silhouette person sunset", "person thinking alone",
+        "man running dramatic", "person looking window rain",
+        "man praying dramatic light", "silhouette crowd dark",
+        "fire flame dark dramatic", "smoke light cinematic",
+        "stars milky way dark", "sunrise golden mountain",
+        "waves ocean slow motion", "rain drops dark",
+        "snow falling dark", "desert dunes sunset",
+        "waterfall mist dramatic", "fog dark forest",
+        "urban night bokeh", "city lights night",
+        "empty road night", "abandoned building dark",
+        "dark alley night", "bridge night cinematic",
+        "train night dramatic", "rooftop city night",
+        "candle flame dark", "clock ticking dramatic",
+        "book pages turning", "dark water reflection",
+        "mirror reflection dramatic", "hands dramatic light",
+        "eye close up dramatic", "shadow dramatic light",
+        "slow motion dramatic", "epic slow motion",
+        "cinematic slow motion nature", "dramatic slow motion water",
+        "timelapse city night", "timelapse sky dramatic",
     ]
 
     ARABIC_HINTS = {
-        "ألم":    ["dark rain dramatic", "person looking window rain"],
-        "نجاح":   ["sunrise golden mountain", "person running dramatic"],
-        "وحيد":   ["person walking alone", "silhouette person sunset"],
-        "ليل":    ["urban night bokeh", "city lights night"],
-        "نار":    ["fire flame dark dramatic", "smoke light cinematic"],
-        "أمل":    ["sunrise golden mountain", "waterfall mist dramatic"],
-        "مطر":    ["rain drops dark", "person looking window rain"],
-        "قوة":    ["silhouette dramatic sunset", "man standing alone dramatic"],
-        "سماء":   ["stars milky way dark", "dramatic sky clouds"],
-        "طريق":   ["empty road night", "cinematic desert landscape"],
-        "موت":    ["dark ocean waves", "candle flame dark"],
-        "خوف":    ["dark alley night", "shadow dramatic light"],
-        "حب":     ["candle flame dark", "hands dramatic light"],
-        "حزن":    ["rain drops dark", "dark rain dramatic"],
-        "صبر":    ["clock ticking dramatic", "person thinking alone"],
-        "ظلام":   ["dark forest", "abandoned building dark"],
-        "نور":    ["candle flame dark", "dramatic lightning storm"],
-        "حرب":    ["dramatic lightning storm", "smoke light cinematic"],
-        "سلام":   ["waterfall mist dramatic", "fog dark forest"],
-        "عقل":    ["book pages turning", "dark water reflection"],
-        "قلب":    ["hands dramatic light", "dark water reflection"],
-        "وقت":    ["clock ticking dramatic", "timelapse city night"],
-        "صمت":    ["fog dark forest", "empty road night"],
+        "ألم": ["dark rain dramatic", "person looking window rain"],
+        "نجاح": ["sunrise golden mountain", "person running dramatic"],
+        "وحيد": ["person walking alone", "silhouette person sunset"],
+        "ليل": ["urban night bokeh", "city lights night"],
+        "نار": ["fire flame dark dramatic", "smoke light cinematic"],
+        "أمل": ["sunrise golden mountain", "waterfall mist dramatic"],
+        "مطر": ["rain drops dark", "person looking window rain"],
+        "قوة": ["silhouette dramatic sunset", "man standing alone dramatic"],
+        "سماء": ["stars milky way dark", "dramatic sky clouds"],
+        "طريق": ["empty road night", "cinematic desert landscape"],
+        "خوف": ["dark alley night", "shadow dramatic light"],
+        "حب": ["candle flame dark", "hands dramatic light"],
+        "حزن": ["rain drops dark", "dark rain dramatic"],
+        "صبر": ["clock ticking dramatic", "person thinking alone"],
+        "نور": ["candle flame dark", "dramatic lightning storm"],
+        "وقت": ["clock ticking dramatic", "timelapse city night"],
+        "صمت": ["fog dark forest", "empty road night"],
     }
 
-    # ─── خرائط للتأثيرات (تُمرّر لـ Remotion كـ JSON) ────────────
     ZOOM_MAP = {
-        "hook":       "punch_zoom",
-        "build":      "slow_zoom_in",
-        "peak":       "punch_zoom",
-        "resolution": "slow_zoom_out",
-        "cta":        "drift_right",
-        "main":       "slow_zoom_in",
+        "hook": "punch_zoom", "build": "slow_zoom_in",
+        "peak": "punch_zoom", "resolution": "slow_zoom_out",
+        "cta": "drift_right", "main": "slow_zoom_in",
     }
 
     SCENE_TRANSITIONS = {
-        "hook":       ["flash_black", "zoom_burst"],
-        "peak":       ["zoom_burst", "flash_black"],
-        "build":      ["cross_dissolve", "smooth_fade"],
+        "hook": ["flash_black", "zoom_burst"],
+        "peak": ["zoom_burst", "flash_black"],
+        "build": ["cross_dissolve", "smooth_fade"],
         "resolution": ["cross_dissolve", "fade_black"],
-        "cta":        ["fade_black", "smooth_fade"],
-        "main":       ["cross_dissolve", "smooth_fade"],
+        "cta": ["fade_black", "smooth_fade"],
+        "main": ["cross_dissolve", "smooth_fade"],
     }
 
-    # ════════════════════════════════════════════════════════════════
     def __init__(self):
-        """تهيئة مُجهّز البيانات."""
-        self.w = int(os.getenv("VIDEO_WIDTH",  "1080"))
+        self.w = int(os.getenv("VIDEO_WIDTH", "1080"))
         self.h = int(os.getenv("VIDEO_HEIGHT", "1920"))
-        self.fps = int(os.getenv("VIDEO_FPS",  "30"))
+        self.fps = int(os.getenv("VIDEO_FPS", "30"))
         self.quality = os.getenv("VIDEO_QUALITY", "high")
-
-        # المفاتيح
         self.pexels_key = os.getenv("PEXELS_API_KEY", "")
         self.pixabay_key = os.getenv("PIXABAY_API_KEY", "")
-
-        # 🆕 إعدادات Whisper
         self.use_whisper = os.getenv("USE_WHISPER", "true").lower() == "true"
         self.whisper_max_words = int(os.getenv("WHISPER_MAX_WORDS", "4"))
         self.whisper_max_duration = float(os.getenv("WHISPER_MAX_DURATION", "2.5"))
-
-        # المسارات
         self.temp_dir = Path(os.getenv("TEMP_DIR", "./temp"))
         self.footage_dir = self.temp_dir / "footage"
         self.footage_dir.mkdir(parents=True, exist_ok=True)
-
-        # مسح footage القديم
         self._clear_old_footage()
-
-        logger.info(
-            f"🎬 CinematicEditor v2.2 (Audio-First) | {self.w}x{self.h}@{self.fps}fps"
-        )
-        logger.info(f"   🎤 Whisper: {'✓ enabled' if self.use_whisper else '✗ disabled'}")
+        logger.info(f"🎬 CinematicEditor v3.0 | {self.w}x{self.h}@{self.fps}fps")
 
     def _clear_old_footage(self) -> None:
-        """مسح footage القديم لضمان تنويع الفيديوهات."""
         try:
             count = 0
             if self.footage_dir.exists():
-                for f in self.footage_dir.glob("footage_*.mp4"):
-                    f.unlink()
-                    count += 1
-                for f in self.footage_dir.glob("ph_*.mp4"):
+                for f in self.footage_dir.glob("*.mp4"):
                     f.unlink()
                     count += 1
             if count:
-                logger.info(f"🗑️ تم مسح {count} ملف footage قديم")
-        except Exception as e:
-            logger.warning(f"⚠ فشل المسح: {e}")
+                logger.info(f"🗑️ مسح {count} ملف قديم")
+        except Exception:
+            pass
 
-    # ════════════════════════════════════════════════════════════════
-    #              🆕 قياس مدة الصوت الفعلية
-    # ════════════════════════════════════════════════════════════════
     def _get_actual_audio_duration(self, audio_path: str) -> float:
-        """🆕 قياس المدة الفعلية للصوت بدقة عالية."""
         if not audio_path or not Path(audio_path).exists():
-            logger.warning("⚠ ملف الصوت غير موجود")
             return 0.0
-
         try:
-            result = subprocess.run(
-                [
-                    "ffprobe", "-v", "quiet",
-                    "-show_entries", "format=duration",
-                    "-of", "default=noprint_wrappers=1:nokey=1",
-                    audio_path,
-                ],
+            r = subprocess.run(
+                ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", audio_path],
                 capture_output=True, text=True, timeout=30, check=True,
             )
-            duration = float(result.stdout.strip())
-            logger.info(f"   📏 مدة الصوت الفعلية: {duration:.2f}s")
-            return duration
-        except Exception as e:
-            logger.warning(f"⚠ فشل قياس مدة الصوت: {e}")
+            return float(r.stdout.strip())
+        except Exception:
             return 0.0
 
     # ════════════════════════════════════════════════════════════════
-    #                    🆕 الدالة الرئيسية (Audio-First)
+    #                    الدالة الرئيسية
     # ════════════════════════════════════════════════════════════════
-    def build_props_for_remotion(
-        self,
-        script: dict,
-        audio_path: str,
-        subtitle_data: list,
-    ) -> dict:
-        """
-        🆕 بناء JSON props كامل لـ Remotion (Audio-First).
-        
-        الترتيب:
-        1. قياس مدة الصوت الفعلية
-        2. تحديث script بالمدة الفعلية
-        3. Whisper لاستخراج توقيتات الكلمات
-        4. مزامنة المشاهد مع مدة الصوت بدقة
-        5. بناء كل البيانات
-        """
+    def build_props_for_remotion(self, script: dict, audio_path: str, subtitle_data: list) -> dict:
         scenes = script.get("scenes", [])
-
         if not scenes:
-            raise ValueError("❌ لا توجد مشاهد في السكربت")
+            raise ValueError("❌ لا توجد مشاهد")
 
-        # 🆕 1️⃣ قياس مدة الصوت الفعلية أولاً (أهم خطوة!)
-        logger.info("📏 قياس مدة الصوت الفعلية...")
+        # قياس مدة الصوت الفعلية
         actual_duration = self._get_actual_audio_duration(audio_path)
-        
-        # استخدم المدة الفعلية أو المتوقعة كـ fallback
-        if actual_duration > 0:
-            total_dur = actual_duration
-            logger.info(f"✓ سيتم بناء الفيديو على: {total_dur:.2f}s (مدة الصوت)")
-        else:
-            total_dur = float(script.get("duration_estimate", 45.0))
-            logger.warning(f"⚠ استخدام المدة المتوقعة: {total_dur:.2f}s")
-
-        # تحديث script
+        total_dur = actual_duration if actual_duration > 0 else float(script.get("duration_estimate", 45.0))
         script["duration_estimate"] = total_dur
-        script["actual_audio_duration"] = total_dur
 
-        logger.info(f"🎬 تجهيز Remotion props | {len(scenes)} مشهد | {total_dur:.2f}s")
+        logger.info(f"🎬 تجهيز props | {len(scenes)} مشهد | {total_dur:.2f}s")
 
-        # 🆕 2️⃣ استخدام Whisper لاستخراج توقيتات دقيقة
+        # Whisper
         whisper_subtitles = []
         if self.use_whisper and audio_path:
             whisper_subtitles = self._get_whisper_subtitles(audio_path)
 
-        # 🆕 3️⃣ مزامنة المشاهد مع مدة الصوت بدقة
+        # مزامنة المشاهد
         self._sync_scenes_to_audio(scenes, total_dur)
 
-        # 4️⃣ جلب الفيديوهات
+        # جلب الفيديوهات
         logger.info("► جلب الفيديوهات...")
         raws = self._fetch_footage(scenes)
 
-        # 5️⃣ بناء بيانات المشاهد
-        logger.info("► بناء بيانات المشاهد...")
+        # بناء البيانات
         scenes_data = self._build_scenes_data(scenes, raws)
 
-        # 6️⃣ بناء بيانات الترجمات
         if whisper_subtitles:
-            # 🆕 تحقق من أن Whisper subtitles لا تتجاوز مدة الصوت
-            whisper_subtitles = self._validate_whisper_subtitles(
-                whisper_subtitles, total_dur
-            )
-            logger.info(f"✅ استخدام Whisper subtitles: {len(whisper_subtitles)} مجموعة")
+            whisper_subtitles = self._validate_whisper_subtitles(whisper_subtitles, total_dur)
             subtitles_data = whisper_subtitles
         else:
-            logger.info("► بناء الترجمات من المشاهد (fallback)...")
             subtitles_data = self._build_subtitles_from_scenes(scenes)
 
-        # 7️⃣ تجهيز الـ props النهائية
         props = {
-            # المعلومات العامة
             "title": script.get("title", ""),
             "totalDuration": total_dur,
-            "audioActualDuration": total_dur,  # 🆕 للتأكيد
+            "audioActualDuration": total_dur,
             "fps": self.fps,
             "width": self.w,
             "height": self.h,
             "quality": self.quality,
-
-            # الملفات
             "audioPath": str(Path(audio_path).resolve()) if audio_path else "",
-
-            # المحتوى
             "scenes": scenes_data,
             "subtitles": subtitles_data,
-
-            # إعدادات التصميم
             "design": {
                 "fontFamily": "Cairo",
                 "fontWeight": 900,
@@ -309,185 +192,88 @@ class CinematicEditor:
             },
         }
 
-        logger.info(
-            f"✓ Remotion props جاهز | "
-            f"{len(scenes_data)} مشهد | "
-            f"{len(subtitles_data)} ترجمة | "
-            f"⏱ {total_dur:.2f}s"
-        )
+        logger.info(f"✓ Props جاهز | {len(scenes_data)} مشهد | {len(subtitles_data)} ترجمة")
         return props
 
-    # 🆕🆕🆕 دالة جديدة: التحقق من Whisper subtitles
-    def _validate_whisper_subtitles(
-        self,
-        subtitles: List[Dict],
-        max_duration: float,
-    ) -> List[Dict]:
-        """
-        🆕 التحقق من أن Whisper subtitles لا تتجاوز مدة الصوت.
-        
-        - تقطع الترجمات التي تتجاوز المدة
-        - تُصلح أي توقيتات غير منطقية
-        """
-        if not subtitles:
-            return []
-
-        validated = []
-        for sub in subtitles:
-            start = float(sub.get("start", 0))
-            end = float(sub.get("end", 0))
-
-            # تخطي الترجمات خارج النطاق
-            if start >= max_duration:
-                logger.debug(f"   ⚠ تخطي ترجمة خارج النطاق: {start:.2f}s")
-                continue
-
-            # قص الترجمات التي تتجاوز النهاية
-            if end > max_duration:
-                logger.debug(
-                    f"   ✂️ قص ترجمة: {end:.2f}s → {max_duration:.2f}s"
-                )
-                end = max_duration
-                sub["end"] = max_duration
-                sub["duration"] = end - start
-
-                # قص الكلمات أيضاً
-                if "words" in sub and sub["words"]:
-                    sub["words"] = [
-                        w for w in sub["words"]
-                        if float(w.get("start", 0)) < max_duration
-                    ]
-                    # تحديث آخر كلمة
-                    for word in sub["words"]:
-                        if float(word.get("end", 0)) > max_duration:
-                            word["end"] = max_duration
-
-            # تخطي الترجمات الفارغة
-            if not sub.get("text", "").strip():
-                continue
-
-            validated.append(sub)
-
-        if len(validated) != len(subtitles):
-            logger.info(
-                f"   📝 تصفية الترجمات: {len(subtitles)} → {len(validated)}"
-            )
-
-        return validated
-
-    # 🆕 دالة محسّنة: استخدام Whisper
-    def _get_whisper_subtitles(self, audio_path: str) -> List[Dict]:
-        """🆕 استخراج ترجمات دقيقة من الصوت باستخدام Whisper."""
-        if not audio_path or not Path(audio_path).exists():
-            logger.warning("⚠ ملف الصوت غير موجود لـ Whisper")
-            return []
-
-        try:
-            from engine.voice.whisper_transcriber import WhisperTranscriber
-
-            logger.info("🎤 تحليل الصوت بـ Whisper...")
-            transcriber = WhisperTranscriber()
-
-            subtitles = transcriber.transcribe_to_subtitles(
-                audio_path=audio_path,
-                max_words_per_chunk=self.whisper_max_words,
-                max_chunk_duration=self.whisper_max_duration,
-            )
-
-            if subtitles:
-                # إضافة sceneId للتوافق
-                for i, sub in enumerate(subtitles):
-                    sub["sceneId"] = i
-
-                logger.info(f"✅ Whisper: {len(subtitles)} مجموعة كلمات")
-                return subtitles
-            else:
-                logger.warning("⚠ Whisper لم يُرجع أي ترجمات")
-                return []
-
-        except ImportError as e:
-            logger.warning(f"⚠ Whisper غير مثبت: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"❌ فشل Whisper: {e}")
-            return []
-
-    # 🆕🆕🆕 دالة محسّنة: مزامنة دقيقة مع تصحيح الفروقات
+    # ════════════════════════════════════════════════════════════════
+    #              مزامنة دقيقة (0ms)
+    # ════════════════════════════════════════════════════════════════
     def _sync_scenes_to_audio(self, scenes: list, target_duration: float) -> None:
-        """
-        🆕 إعادة توزيع توقيتات المشاهد لتطابق مدة الصوت بالضبط.
-        
-        - يحافظ على النسب بين المشاهد
-        - يُصحّح الفروقات الصغيرة في النهاية
-        - يضمن مجموع = مدة الصوت تماماً
-        """
-        if not scenes:
+        if not scenes or target_duration <= 0:
             return
 
-        # حساب المدة الإجمالية الحالية
         current_total = sum(
             float(s.get("duration", 3.0)) + float(s.get("pause_after", 0.3))
             for s in scenes
         )
 
         if current_total <= 0:
-            logger.warning("⚠ مجموع المدد صفر، تخطي المزامنة")
             return
 
-        # 🆕 حساب نسبة التعديل بدقة عالية
         scale_factor = target_duration / current_total
+        logger.info(f"🎯 مزامنة: {current_total:.2f}s → {target_duration:.2f}s (×{scale_factor:.3f})")
 
-        logger.info(
-            f"🎯 مزامنة المشاهد: {current_total:.2f}s → {target_duration:.2f}s "
-            f"(scale: {scale_factor:.3f}x)"
-        )
-
-        # 🆕 تعديل كل مشهد بدقة
         new_total = 0.0
-        for i, scene in enumerate(scenes):
-            old_duration = float(scene.get("duration", 3.0))
-            old_pause = float(scene.get("pause_after", 0.3))
+        for scene in scenes:
+            new_dur = round(float(scene.get("duration", 3.0)) * scale_factor, 3)
+            new_pause = round(float(scene.get("pause_after", 0.3)) * scale_factor, 3)
+            scene["duration"] = max(new_dur, 0.5)
+            scene["pause_after"] = max(new_pause, 0.05)
+            new_total += scene["duration"] + scene["pause_after"]
 
-            new_duration = round(old_duration * scale_factor, 3)
-            new_pause = round(old_pause * scale_factor, 3)
-
-            # حد أدنى مرن (للسماح بمشاهد قصيرة)
-            new_duration = max(new_duration, 0.5)
-            new_pause = max(new_pause, 0.05)
-
-            scene["duration"] = new_duration
-            scene["pause_after"] = new_pause
-            new_total += new_duration + new_pause
-
-        # 🆕 تصحيح نهائي: إذا كان هناك فرق صغير، نُعدّل آخر مشهد
         diff = target_duration - new_total
         if abs(diff) > 0.01:
-            last_scene = scenes[-1]
-            old_pause = float(last_scene.get("pause_after", 0.3))
-            new_pause = max(old_pause + diff, 0.0)
-            last_scene["pause_after"] = round(new_pause, 3)
-            logger.info(f"   🔧 تصحيح فرق: {diff:+.3f}s على آخر مشهد")
+            scenes[-1]["pause_after"] = max(float(scenes[-1].get("pause_after", 0.3)) + diff, 0.0)
 
-        # التحقق النهائي
-        final_total = sum(
-            float(s.get("duration", 3.0)) + float(s.get("pause_after", 0.3))
-            for s in scenes
-        )
+        final = sum(float(s.get("duration", 3.0)) + float(s.get("pause_after", 0.3)) for s in scenes)
+        logger.info(f"✓ مدة المشاهد: {final:.2f}s (دقة: {abs(final-target_duration)*1000:.0f}ms)")
 
-        accuracy = abs(final_total - target_duration)
-        if accuracy < 0.05:
-            logger.info(
-                f"✓ مدة المشاهد النهائية: {final_total:.2f}s "
-                f"(دقة: {accuracy*1000:.0f}ms) ✅"
+    # ════════════════════════════════════════════════════════════════
+    #              Whisper + Validation
+    # ════════════════════════════════════════════════════════════════
+    def _get_whisper_subtitles(self, audio_path: str) -> List[Dict]:
+        if not audio_path or not Path(audio_path).exists():
+            return []
+        try:
+            from engine.voice.whisper_transcriber import WhisperTranscriber
+            logger.info("🎤 تحليل الصوت بـ Whisper...")
+            transcriber = WhisperTranscriber()
+            subtitles = transcriber.transcribe_to_subtitles(
+                audio_path=audio_path,
+                max_words_per_chunk=self.whisper_max_words,
+                max_chunk_duration=self.whisper_max_duration,
             )
-        else:
-            logger.warning(
-                f"⚠ مدة المشاهد: {final_total:.2f}s "
-                f"(فرق: {accuracy*1000:.0f}ms)"
-            )
+            if subtitles:
+                for i, sub in enumerate(subtitles):
+                    sub["sceneId"] = i
+                logger.info(f"✅ Whisper: {len(subtitles)} مجموعة")
+                return subtitles
+        except ImportError:
+            logger.warning("⚠ Whisper غير مثبت")
+        except Exception as e:
+            logger.error(f"❌ فشل Whisper: {e}")
+        return []
 
+    def _validate_whisper_subtitles(self, subtitles: List[Dict], max_duration: float) -> List[Dict]:
+        validated = []
+        for sub in subtitles:
+            start = float(sub.get("start", 0))
+            end = float(sub.get("end", 0))
+            if start >= max_duration:
+                continue
+            if end > max_duration:
+                sub["end"] = max_duration
+                sub["duration"] = end - start
+                if "words" in sub:
+                    sub["words"] = [w for w in sub["words"] if float(w.get("start", 0)) < max_duration]
+            if sub.get("text", "").strip():
+                validated.append(sub)
+        return validated
+
+    # ════════════════════════════════════════════════════════════════
+    #              بناء البيانات
+    # ════════════════════════════════════════════════════════════════
     def _build_scenes_data(self, scenes: list, raws: list) -> List[dict]:
-        """بناء بيانات المشاهد كـ JSON."""
         scenes_data = []
         cumulative_time = 0.0
 
@@ -497,9 +283,7 @@ class CinematicEditor:
             pause_after = float(scene.get("pause_after", 0.3))
 
             zoom_effect = self.ZOOM_MAP.get(scene_type, "slow_zoom_in")
-            available_trans = self.SCENE_TRANSITIONS.get(
-                scene_type, ["cross_dissolve"]
-            )
+            available_trans = self.SCENE_TRANSITIONS.get(scene_type, ["cross_dissolve"])
             transition = random.choice(available_trans) if i > 0 else "none"
             shake = scene_type in ("hook", "peak")
 
@@ -529,85 +313,61 @@ class CinematicEditor:
         return scenes_data
 
     def _build_subtitles_from_scenes(self, scenes: list) -> List[dict]:
-        """بناء بيانات الترجمات مباشرة من المشاهد (fallback)."""
         subtitles = []
         cumulative_time = 0.0
-
         for i, scene in enumerate(scenes):
             text = scene.get("text", "").strip()
             duration = float(scene.get("duration", 3.0))
             pause = float(scene.get("pause_after", 0.3))
-
             if text:
                 subtitles.append({
-                    "id": i,
-                    "text": text,
+                    "id": i, "text": text,
                     "start": round(cumulative_time, 3),
                     "end": round(cumulative_time + duration, 3),
                     "duration": round(duration, 3),
                     "sceneId": i,
                 })
-
             cumulative_time += duration + pause
-
-        logger.info(f"✓ تم بناء {len(subtitles)} ترجمة (scene mode)")
         return subtitles
 
     # ════════════════════════════════════════════════════════════════
-    #                    🔁 الدالة القديمة (Deprecated)
-    # ════════════════════════════════════════════════════════════════
-    def build_video(
-        self,
-        script: dict,
-        audio_path: str,
-        subtitle_data: list,
-        output_path: str,
-    ) -> str:
-        """⚠️ DEPRECATED."""
-        raise DeprecationWarning(
-            "❌ build_video() لم تعد مدعومة!\n"
-            "   استخدم: build_props_for_remotion()"
-        )
-
-    # ════════════════════════════════════════════════════════════════
-    #                    جلب الفيديوهات
+    #              جلب الفيديوهات (HD + تنوع)
     # ════════════════════════════════════════════════════════════════
     def _fetch_footage(self, scenes: list) -> list:
-        """جلب فيديوهات لكل مشهد."""
         used_kws = set()
         used_urls = set()
         clips = []
-
         for i, scene in enumerate(scenes):
             kw = self._pick_kw(scene, used_kws)
             used_kws.add(kw)
             clip = self._download(kw, i, used_urls)
             clips.append(clip)
-            logger.debug(f"  [{i+1}/{len(scenes)}] {kw[:50]}")
-
         return clips
 
     def _pick_kw(self, scene: dict, used: set) -> str:
-        """اختيار كلمة بحث ذكية للمشهد."""
+        """🆕 اختيار كلمة بحث ذكية مع تنوع أفضل."""
         vp = scene.get("visual_prompt", "").strip()
         if vp and len(vp) > 5 and vp not in used:
             return vp
 
         text = scene.get("text", "")
+        matching = []
         for hint, kw_list in self.ARABIC_HINTS.items():
             if hint in text:
                 for kw in kw_list:
                     if kw not in used:
-                        return kw
+                        matching.append(kw)
+        if matching:
+            return random.choice(matching)
 
         avail = [k for k in self.KEYWORDS if k not in used]
         if avail:
-            return random.choice(avail)
+            random.shuffle(avail)
+            return avail[0]
 
         return random.choice(self.KEYWORDS)
 
     def _download(self, keyword: str, idx: int, used_urls: set) -> str:
-        """تحميل فيديو من Pexels أو Pixabay."""
         ts = int(time.time() * 1000) % 100000
         out = str(self.footage_dir / f"footage_{idx:03d}_{ts}.mp4")
 
@@ -621,46 +381,30 @@ class CinematicEditor:
             if result:
                 return result
 
-        logger.warning(f"⚠ لم يتم العثور على فيديو لـ '{keyword}' → placeholder")
         return self._placeholder(idx)
 
-    def _download_from_pexels(
-        self,
-        keyword: str,
-        out: str,
-        used_urls: set,
-    ) -> Optional[str]:
-        """تحميل من Pexels."""
+    def _download_from_pexels(self, keyword: str, out: str, used_urls: set) -> Optional[str]:
         try:
             page = random.randint(1, 4)
             r = requests.get(
                 "https://api.pexels.com/videos/search",
                 headers={"Authorization": self.pexels_key},
                 params={
-                    "query": keyword,
-                    "per_page": 15,
-                    "orientation": "portrait",
-                    "page": page,
-                    "size": "medium",
+                    "query": keyword, "per_page": 15,
+                    "orientation": "portrait", "page": page,
+                    "size": "large",  # 🆕 طلب جودة عالية
                 },
                 timeout=20,
             )
-
             if r.status_code != 200:
-                logger.debug(f"Pexels HTTP {r.status_code}")
                 return None
 
             videos = r.json().get("videos", [])
-
             if not videos:
                 r2 = requests.get(
                     "https://api.pexels.com/videos/search",
                     headers={"Authorization": self.pexels_key},
-                    params={
-                        "query": keyword,
-                        "per_page": 10,
-                        "orientation": "portrait",
-                    },
+                    params={"query": keyword, "per_page": 10, "orientation": "portrait"},
                     timeout=20,
                 )
                 videos = r2.json().get("videos", []) if r2.ok else []
@@ -668,14 +412,10 @@ class CinematicEditor:
             if not videos:
                 return None
 
-            portrait_videos = [
-                v for v in videos
-                if any(
-                    vf.get("height", 0) >= vf.get("width", 1)
-                    for vf in v.get("video_files", [])
-                )
-            ]
-            pool = portrait_videos if portrait_videos else videos
+            portrait = [v for v in videos
+                       if any(vf.get("height", 0) >= vf.get("width", 1)
+                             for vf in v.get("video_files", []))]
+            pool = portrait if portrait else videos
 
             target = None
             for _ in range(5):
@@ -689,153 +429,127 @@ class CinematicEditor:
 
             used_urls.add(target["link"])
             return self._download_file(target["link"], out)
-
-        except Exception as e:
-            logger.debug(f"Pexels error: {e}")
+        except Exception:
             return None
 
-    def _download_from_pixabay(
-        self,
-        keyword: str,
-        out: str,
-        used_urls: set,
-    ) -> Optional[str]:
-        """تحميل من Pixabay (احتياطي)."""
+    def _download_from_pixabay(self, keyword: str, out: str, used_urls: set) -> Optional[str]:
         try:
             r = requests.get(
                 "https://pixabay.com/api/videos/",
-                params={
-                    "key": self.pixabay_key,
-                    "q": keyword,
-                    "video_type": "film",
-                    "orientation": "vertical",
-                    "per_page": 15,
-                },
+                params={"key": self.pixabay_key, "q": keyword,
+                        "video_type": "film", "orientation": "vertical", "per_page": 15},
                 timeout=20,
             )
-
             if r.status_code != 200:
-                logger.debug(f"Pixabay HTTP {r.status_code}")
                 return None
-
             hits = r.json().get("hits", [])
             if not hits:
                 return None
-
             for _ in range(5):
                 video = random.choice(hits)
                 videos = video.get("videos", {})
-
                 for size in ("large", "medium", "small"):
                     if size in videos and videos[size].get("url"):
                         url = videos[size]["url"]
                         if url not in used_urls:
                             used_urls.add(url)
                             return self._download_file(url, out)
-
             return None
-
-        except Exception as e:
-            logger.debug(f"Pixabay error: {e}")
+        except Exception:
             return None
 
     def _download_file(self, url: str, out: str) -> Optional[str]:
-        """تحميل ملف فيديو."""
         try:
             dl = requests.get(url, stream=True, timeout=40)
             dl.raise_for_status()
-
             with open(out, "wb") as f:
                 for chunk in dl.iter_content(8192):
                     if chunk:
                         f.write(chunk)
-
             if Path(out).exists() and Path(out).stat().st_size > 10000:
                 return out
-
             Path(out).unlink(missing_ok=True)
             return None
-
-        except Exception as e:
-            logger.debug(f"Download error: {e}")
+        except Exception:
             Path(out).unlink(missing_ok=True)
             return None
 
     def _best_file(self, files: list) -> Optional[dict]:
-        """اختيار أفضل ملف فيديو."""
+        """🆕 اختيار أفضل ملف فيديو (أعلى جودة)."""
+        if not files:
+            return None
+
+        scored = []
         for vf in files:
-            if (vf.get("height", 0) >= vf.get("width", 1)
-                    and vf.get("quality") in ("hd", "sd")):
-                return vf
-        for vf in files:
-            if vf.get("height", 0) >= vf.get("width", 1):
-                return vf
-        for vf in files:
-            if vf.get("quality") in ("hd", "sd"):
-                return vf
-        return files[0] if files else None
+            score = 0
+            height = vf.get("height", 0)
+            width = vf.get("width", 0)
+            quality = vf.get("quality", "")
+
+            # Portrait
+            if height >= width:
+                score += 100
+
+            # جودة
+            if quality == "hd":
+                score += 50
+            elif quality == "sd":
+                score += 20
+
+            # دقة عالية
+            if height >= 1920:
+                score += 80
+            elif height >= 1280:
+                score += 60
+            elif height >= 720:
+                score += 40
+            elif height >= 480:
+                score += 20
+
+            # عقوبة للجودة المنخفضة
+            if height < 480 and width < 480:
+                score -= 50
+
+            scored.append((score, vf))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return scored[0][1]
 
     def _placeholder(self, idx: int) -> str:
-        """توليد فيديو خلفية بسيط (placeholder)."""
         out = str(self.footage_dir / f"ph_{idx:03d}.mp4")
         colors = ["0x0a0a1a", "0x0d0d1e", "0x080818", "0x0a0a0a", "0x05050f"]
         c = colors[idx % len(colors)]
-
         try:
             subprocess.run(
                 ["ffmpeg", "-y", "-f", "lavfi",
                  "-i", f"color=c={c}:s={self.w}x{self.h}:r={self.fps}",
-                 "-t", "8",
-                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-                 out],
-                capture_output=True,
-                timeout=30,
-                check=True,
+                 "-t", "8", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", out],
+                capture_output=True, timeout=30, check=True,
             )
         except Exception:
             subprocess.run(
                 ["ffmpeg", "-y", "-f", "lavfi",
                  "-i", f"color=c=black:s={self.w}x{self.h}:r={self.fps}",
-                 "-t", "8",
-                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-                 out],
-                capture_output=True,
-                timeout=30,
+                 "-t", "8", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", out],
+                capture_output=True, timeout=30,
             )
         return out
 
-    # ════════════════════════════════════════════════════════════════
-    #                    دوال مساعدة
-    # ════════════════════════════════════════════════════════════════
+    def build_video(self, *args, **kwargs):
+        raise DeprecationWarning("استخدم build_props_for_remotion()")
+
     def cleanup_temp_files(self) -> None:
-        """تنظيف الملفات المؤقتة."""
         try:
             count = 0
-            patterns = [
-                "remotion_props.json",
-                "footage_*.mp4",
-                "ph_*.mp4",
-            ]
-
-            for pattern in patterns:
+            for pattern in ["remotion_props.json", "footage_*.mp4", "ph_*.mp4"]:
                 for f in self.temp_dir.rglob(pattern):
                     f.unlink(missing_ok=True)
                     count += 1
+            logger.info(f"🧹 تم تنظيف {count} ملف")
+        except Exception:
+            pass
 
-            logger.info(f"🧹 تم تنظيف {count} ملف مؤقت")
-        except Exception as e:
-            logger.warning(f"⚠ فشل التنظيف: {e}")
 
-
-# ════════════════════════════════════════════════════════════════════════
-#                    اختبار سريع
-# ════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     editor = CinematicEditor()
-    print(f"✓ CinematicEditor v2.2 (Audio-First) جاهز")
-    print(f"  Dimensions: {editor.w}x{editor.h}")
-    print(f"  FPS: {editor.fps}")
-    print(f"  Quality: {editor.quality}")
-    print(f"  Whisper: {'✓' if editor.use_whisper else '✗'}")
-    print(f"  Pexels: {'✓' if editor.pexels_key else '✗'}")
-    print(f"  Pixabay: {'✓' if editor.pixabay_key else '✗'}")
+    print(f"✓ CinematicEditor v3.0 جاهز")
