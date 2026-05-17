@@ -335,7 +335,8 @@ class PromptEngine:
    ✓ بدون تعقيد لغوي
 
 2️⃣ **المدة:** {target_duration} ثانية بالضبط
-   ✓ عدد الكلمات الإجمالي: {self._get_word_count(target_duration)} كلمة (مهم جداً!)
+   ✓ عدد الكلمات الإجمالي: 
+{min_words * min_scenes}-{max_words * max_scenes} كلمة (مهم جداً!)
    ✓ كل مشهد: {min_words}-{max_words} كلمات
 
 3️⃣ **عدد المشاهد:** {min_scenes}-{max_scenes} مشهد
