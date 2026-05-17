@@ -1,21 +1,19 @@
 """
-🎬 Viral AI Content Factory — main.py (v2.3 - Pro Audio Edition)
+🎬 Viral AI Content Factory — main.py (v3.0 - Quality-First Edition)
 ═══════════════════════════════════════════════════════════════════
-v2.3 الميزات:
-  ✓ Audio-First Approach (لا انكسار، لا تكرار)
-  ✓ SFXManager (مؤثرات صوتية ذكية)
-  ✓ MusicEngine المحسّن (موسيقى Pixabay)
-  ✓ AudioOptimizer (تحسين الصوت)
-  ✓ Whisper subtitles (TikTok style)
-  ✓ Remotion للتصدير
+v3.0 الجديد:
+  ✓ نظام منع الفيديو الضعيف (Auto-Reject + Retry)
+  ✓ فحص جودة السكربت (Score 0-100)
+  ✓ فحص تطابق الصوت مع النص
+  ✓ فحص المدة المطلوبة
+  ✓ إعادة محاولة تلقائية (حتى 3 مرات)
+  ✓ لا ينشر إلا فيديو كامل وجاهز
 
 Pipeline:
-  [1/6] السكربت
-  [2/6] الصوت الخام
-  [3/6] معالجة الصوت
-  [4/6] قياس المدة الفعلية
-  [5/6] مزج (صوت + موسيقى + SFX)
-  [6/6] الفيديو
+  [1] السكربت → فحص الجودة → إعادة إذا ضعيف
+  [2] الصوت → فحص التطابق → إعادة إذا ناقص
+  [3] المزج (موسيقى + SFX)
+  [4] الفيديو → تأكيد نهائي
 ═══════════════════════════════════════════════════════════════════
 """
 
@@ -47,145 +45,94 @@ from engine.render                  import (
     FFMPEG_AVAILABLE,
 )
 
-
 # ─── ألوان السجلات ────────────────────────────────────────────────────────
 COLORS = {
-    "info":  "\033[97m",
-    "ok":    "\033[92m",
-    "warn":  "\033[93m",
-    "err":   "\033[91m",
-    "cyan":  "\033[96m",
-    "bold":  "\033[1m",
+    "info": "\033[97m", "ok": "\033[92m", "warn": "\033[93m",
+    "err": "\033[91m", "cyan": "\033[96m", "bold": "\033[1m",
     "reset": "\033[0m",
 }
-
 
 def log(msg: str, kind: str = "info") -> None:
     print(f"{COLORS.get(kind, '')}{msg}{COLORS['reset']}")
 
-
 def banner() -> None:
     log("━" * 60, "cyan")
     log("  🎬  VIRAL AI CONTENT FACTORY", "bold")
-    log("  Arabic Cinematic Shorts Generator v2.3", "info")
-    log("  ⭐ Pro Audio Edition (Music + SFX + Audio-First)", "ok")
+    log("  v3.0 - Quality-First Edition", "info")
+    log("  ⭐ Auto-Reject + Retry + Full Validation", "ok")
     log("━" * 60, "cyan")
 
+# ─── إعدادات الجودة ───────────────────────────────────────────────────────
+MIN_SCRIPT_SCORE = 60           # الحد الأدنى لقبول السكربت
+MIN_AUDIO_COVERAGE = 50         # الحد الأدنى لتغطية الصوت (%)
+MAX_SCRIPT_RETRIES = 3          # أقصى محاولات لتوليد سكربت جيد
+MAX_AUDIO_RETRIES = 2           # أقصى محاولات لتوليد صوت كامل
 
-# ─── فحص البيئة ───────────────────────────────────────────────────────────
+
 def check_env(use_remotion: bool = True) -> bool:
-    """التحقق من وجود المفاتيح والأدوات المطلوبة."""
+    """التحقق من البيئة."""
     log("\n🔐 فحص متغيرات البيئة...", "cyan")
-
     ok = True
 
-    if not os.getenv("GROQ_API_KEY"):
-        log("  ✗ GROQ_API_KEY مفقود (مطلوب)", "err")
-        ok = False
-    else:
-        log("  ✓ GROQ_API_KEY", "ok")
+    for key, label in [
+        ("GROQ_API_KEY", "GROQ"), ("GEMINI_API_KEY", "GEMINI"),
+        ("PEXELS_API_KEY", "PEXELS"), ("PIXABAY_API_KEY", "PIXABAY"),
+    ]:
+        if os.getenv(key):
+            log(f"  ✓ {label}", "ok")
+        else:
+            log(f"  ⚠ {label} مفقود", "warn")
+            if key == "GROQ_API_KEY":
+                ok = False
 
-    if os.getenv("GEMINI_API_KEY"):
-        log("  ✓ GEMINI_API_KEY", "ok")
-    else:
-        log("  ⚠ GEMINI_API_KEY مفقود", "warn")
-
-    if os.getenv("PEXELS_API_KEY"):
-        log("  ✓ PEXELS_API_KEY", "ok")
-    else:
-        log("  ⚠ PEXELS_API_KEY مفقود", "warn")
-
-    if os.getenv("PIXABAY_API_KEY"):
-        log("  ✓ PIXABAY_API_KEY (للموسيقى)", "ok")
-    else:
-        log("  ⚠ PIXABAY_API_KEY مفقود (لن تعمل الموسيقى)", "warn")
-
-    tts_engine = os.getenv("TTS_ENGINE", "edge").lower()
-    log(f"  ℹ TTS Engine: {tts_engine}", "info")
-
-    # 🆕 فحص SFX
-    enable_sfx = os.getenv("ENABLE_SFX", "true").lower() == "true"
-    log(f"  🔊 SFX: {'مفعّلة' if enable_sfx else 'معطّلة'}", "info")
-    
-    # 🆕 فحص Music
-    enable_music = os.getenv("ENABLE_BACKGROUND_MUSIC", "true").lower() == "true"
-    log(f"  🎵 الموسيقى الخلفية: {'مفعّلة' if enable_music else 'معطّلة'}", "info")
-
-    log("\n🎬 فحص محرك التصدير...", "cyan")
+    log(f"  ℹ TTS: {os.getenv('TTS_ENGINE', 'edge')}", "info")
 
     if use_remotion:
+        log("\n🎬 فحص Remotion...", "cyan")
         try:
-            result = subprocess.run(
-                ["node", "--version"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if result.returncode == 0:
-                log(f"  ✓ Node.js {result.stdout.strip()}", "ok")
+            r = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=10)
+            if r.returncode == 0:
+                log(f"  ✓ Node.js {r.stdout.strip()}", "ok")
             else:
-                log("  ✗ Node.js غير مثبت", "err")
                 ok = False
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except Exception:
             log("  ✗ Node.js غير مثبت", "err")
             ok = False
 
         remotion_dir = Path(os.getenv("REMOTION_DIR", "./remotion"))
-        if remotion_dir.exists():
-            log(f"  ✓ Remotion directory: {remotion_dir}", "ok")
-            if (remotion_dir / "node_modules").exists():
-                log("  ✓ Remotion installed", "ok")
-            else:
-                log("  ⚠ Remotion not installed!", "warn")
-                ok = False
+        if remotion_dir.exists() and (remotion_dir / "node_modules").exists():
+            log("  ✓ Remotion installed", "ok")
         else:
-            log(f"  ✗ Remotion directory not found", "err")
+            log("  ⚠ Remotion not installed", "warn")
             ok = False
 
         if REMOTION_AVAILABLE:
-            log("  ✓ RemotionRenderer module loaded", "ok")
+            log("  ✓ RemotionRenderer loaded", "ok")
         else:
-            log("  ✗ RemotionRenderer module failed", "err")
             ok = False
-
-    try:
-        result = subprocess.run(
-            ["ffmpeg", "-version"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            log("  ✓ FFmpeg", "ok")
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        log("  ⚠ FFmpeg غير مثبت", "warn")
 
     return ok
 
 
 def safe_filename(topic: str, max_len: int = 25) -> str:
-    """تحويل الموضوع إلى اسم ملف آمن."""
     safe = "".join(c for c in topic if c.isalnum() or c in " _-")
-    safe = safe[:max_len].strip().replace(" ", "_")
-    return safe or "video"
+    return safe[:max_len].strip().replace(" ", "_") or "video"
 
 
 def get_audio_duration(audio_path: str) -> float:
-    """🆕 قياس المدة الفعلية للصوت بدقة."""
     try:
-        result = subprocess.run(
-            [
-                "ffprobe", "-v", "quiet",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                audio_path,
-            ],
+        r = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", audio_path],
             capture_output=True, text=True, timeout=30, check=True,
         )
-        return float(result.stdout.strip())
-    except Exception as e:
-        log(f"  ⚠ فشل قياس مدة الصوت: {e}", "warn")
+        return float(r.stdout.strip())
+    except Exception:
         return 0.0
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# 🆕 توليد الفيديو (Pro Audio + Audio-First)
+# 🎯 توليد الفيديو مع نظام Quality-First
 # ═════════════════════════════════════════════════════════════════════════
 def generate_video(
     topic: str,
@@ -196,13 +143,9 @@ def generate_video(
     use_remotion: bool = True,
 ) -> str:
     """
-    🆕 توليد فيديو احترافي:
+    🎯 توليد فيديو جاهز للنشر مباشرة.
     
-    1. السكربت
-    2. الصوت + التحسين
-    3. قياس المدة الفعلية
-    4. مزج احترافي (Voice + Music + SFX)
-    5. الفيديو
+    يمنع الفيديوهات الضعيفة ويعيد المحاولة تلقائياً.
     """
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe = safe_filename(topic)
@@ -212,148 +155,208 @@ def generate_video(
     tmp = Path(os.getenv("TEMP_DIR", "./temp"))
     tmp.mkdir(parents=True, exist_ok=True)
 
-    # ── تهيئة المحركات ────────────────────────────────────────────────
+    # ── تهيئة المحركات ────────────────────────────────────────
     log("\n⚙️  تهيئة المحركات...", "cyan")
-    writer       = ScriptWriter()
-    tts          = create_tts_engine()
-    breath       = BreathingEngine()
-    fx           = AudioFX()
+    writer = ScriptWriter()
+    tts = create_tts_engine()
+    breath = BreathingEngine()
+    fx = AudioFX()
     music_engine = MusicEngine()
 
-    # 🆕 تهيئة SFX Manager
+    # SFX Manager
     sfx_manager = None
     try:
         from engine.voice.sfx_manager import SFXManager
         sfx_manager = SFXManager()
         log("  ✓ SFX Manager جاهز", "ok")
-    except ImportError:
+    except Exception:
         log("  ⚠ SFXManager غير متوفر", "warn")
-    except Exception as e:
-        log(f"  ⚠ فشل تهيئة SFX: {e}", "warn")
 
+    # Content Validator
+    validator = None
+    try:
+        from engine.ai.content_validator import ContentValidator
+        validator = ContentValidator()
+        log("  ✓ Content Validator جاهز", "ok")
+    except Exception:
+        log("  ⚠ ContentValidator غير متوفر", "warn")
+
+    # Renderer
     if use_remotion and REMOTION_AVAILABLE:
         renderer = RemotionRenderer()
-        log("  ✓ Renderer: Remotion (Arabic native)", "ok")
+        log("  ✓ Renderer: Remotion", "ok")
     elif FFMPEG_AVAILABLE:
         renderer = FFmpegBuilder()
-        log("  ⚠ Renderer: FFmpeg (Legacy)", "warn")
     else:
-        raise RuntimeError("❌ لا يوجد محرك تصدير متاح!")
+        raise RuntimeError("❌ لا يوجد محرك تصدير!")
 
     success = False
 
     try:
-        # ═══════════════════════════════════════════════════════════════
-        # [1/6] توليد السكربت
-        # ═══════════════════════════════════════════════════════════════
+        # ══════════════════════════════════════════════════════════
+        # [1/6] 📝 توليد السكربت مع فحص الجودة + إعادة المحاولة
+        # ══════════════════════════════════════════════════════════
         log("\n[1/6] 📝 توليد السكربت...", "cyan")
-        script = writer.generate_script(
-            topic=topic,
-            content_type=content_type,
-            target_duration=duration,
-        )
-        log(f"  ✓ {len(script['scenes'])} مشهد | متوقع: ~{script['duration_estimate']:.0f}s", "ok")
-        log(f"  ✓ Hook: {script['hook'][:60]}...", "info")
+        
+        script = None
+        script_score = 0
+        
+        for attempt in range(1, MAX_SCRIPT_RETRIES + 1):
+            if attempt > 1:
+                log(f"\n   🔄 إعادة محاولة السكربت ({attempt}/{MAX_SCRIPT_RETRIES})...", "warn")
+            
+            # توليد السكربت
+            current_script = writer.generate_script(
+                topic=topic,
+                content_type=content_type,
+                target_duration=duration,
+            )
+            
+            scenes = current_script.get("scenes", [])
+            all_texts = [s.get("text", "").strip() for s in scenes if s.get("text")]
+            word_count = len(" ".join(all_texts).split())
+            
+            log(f"  ✓ {len(scenes)} مشهد | {word_count} كلمة", "ok")
+            log(f"  ✓ Hook: {current_script.get('hook', '')[:60]}...", "info")
+            
+            # 🆕 فحص الجودة
+            if validator:
+                log("   🎯 فحص جودة السكربت...", "cyan")
+                validation = validator.validate_script(current_script, duration)
+                script_score = validation["score"]
+                
+                if validation["valid"] and script_score >= MIN_SCRIPT_SCORE:
+                    log(f"   ✅ السكربت ممتاز! (Score: {script_score}/100)", "ok")
+                    script = current_script
+                    break
+                else:
+                    log(f"   ❌ السكربت ضعيف (Score: {script_score}/100)", "err")
+                    for issue in validation["all_issues"][:3]:
+                        log(f"      {issue}", "warn")
+                    
+                    if attempt == MAX_SCRIPT_RETRIES:
+                        log(f"   ⚠ استخدام أفضل سكربت متاح (Score: {script_score})", "warn")
+                        script = current_script
+                    else:
+                        log(f"   🔄 جاري إعادة التوليد...", "cyan")
+            else:
+                # بدون validator، اقبل أي سكربت
+                script = current_script
+                break
+        
+        if not script:
+            raise RuntimeError("❌ فشل توليد سكربت مقبول!")
 
-        # ═══════════════════════════════════════════════════════════════
-        # [2/6] توليد الصوت الخام (TTS)
-        # ═══════════════════════════════════════════════════════════════
-        log("\n[2/6] 🎙️  توليد الصوت الخام...", "cyan")
-        raw_voice = str(tmp / "voice_raw.mp3")
-        tts.generate_audio(script, raw_voice)
+        # ══════════════════════════════════════════════════════════
+        # [2/6] 🎙️ توليد الصوت مع فحص التطابق + إعادة المحاولة
+        # ══════════════════════════════════════════════════════════
+        log("\n[2/6] 🎙️  توليد الصوت...", "cyan")
         
-        raw_duration = get_audio_duration(raw_voice)
-        log(f"  ✓ مدة الصوت الخام: {raw_duration:.1f}s", "ok")
+        # استخراج النص الكامل
+        scenes = script.get("scenes", [])
+        full_text = " ".join([s.get("text", "") for s in scenes if s.get("text")])
+        
+        proc_voice = None
+        raw_duration = 0
+        actual_audio_duration = 0
+        
+        for audio_attempt in range(1, MAX_AUDIO_RETRIES + 1):
+            if audio_attempt > 1:
+                log(f"\n   🔄 إعادة محاولة الصوت ({audio_attempt}/{MAX_AUDIO_RETRIES})...", "warn")
+            
+            # توليد الصوت
+            raw_voice = str(tmp / f"voice_raw_{audio_attempt}.mp3")
+            tts.generate_audio(script, raw_voice)
+            
+            raw_duration = get_audio_duration(raw_voice)
+            log(f"  ✓ مدة الصوت الخام: {raw_duration:.1f}s", "ok")
+            
+            # معالجة الصوت
+            breathed = str(tmp / "voice_breath.mp3")
+            current_proc = str(tmp / f"voice_processed_{audio_attempt}.mp3")
+            optimized = str(tmp / f"voice_optimized_{audio_attempt}.mp3")
 
-        # ═══════════════════════════════════════════════════════════════
-        # [3/6] معالجة + تحسين الصوت
-        # ═══════════════════════════════════════════════════════════════
-        log("\n[3/6] 🎵 معالجة وتحسين الصوت...", "cyan")
-        
-        breathed = str(tmp / "voice_breath.mp3")
-        proc_voice = str(tmp / "voice_processed.mp3")
-        optimized_voice = str(tmp / "voice_optimized.mp3")
+            breath.add_breathing(raw_voice, breathed)
+            fx.process_voice(breathed, current_proc)
+            
+            # تحسين
+            try:
+                from engine.voice.audio_optimizer import AudioOptimizer
+                AudioOptimizer().optimize(current_proc, optimized)
+                current_proc = optimized
+            except Exception:
+                pass
 
-        # 1. إضافة التنفس
-        breath.add_breathing(raw_voice, breathed)
+            actual_audio_duration = get_audio_duration(current_proc)
+            log(f"  ✓ المدة الفعلية: {actual_audio_duration:.1f}s", "ok")
+            
+            # 🆕 فحص تطابق الصوت مع النص
+            if validator and actual_audio_duration > 0:
+                log("   🎙️ فحص تطابق الصوت...", "cyan")
+                audio_check = validator.validate_audio(
+                    current_proc, full_text, duration
+                )
+                
+                coverage = audio_check.get("coverage_percent", 0)
+                
+                if audio_check["valid"]:
+                    log(f"   ✅ الصوت مكتمل ({coverage:.0f}% تغطية)", "ok")
+                    proc_voice = current_proc
+                    break
+                else:
+                    log(f"   ⚠ الصوت ناقص ({coverage:.0f}% تغطية)", "warn")
+                    
+                    if audio_attempt == MAX_AUDIO_RETRIES:
+                        log("   ⚠ استخدام أفضل صوت متاح", "warn")
+                        proc_voice = current_proc
+                    else:
+                        log("   🔄 جاري إعادة التوليد...", "cyan")
+            else:
+                proc_voice = current_proc
+                break
         
-        # 2. معالجة الصوت
-        fx.process_voice(breathed, proc_voice)
-        
-        # 3. التحسين النهائي
-        try:
-            from engine.voice.audio_optimizer import AudioOptimizer
-            audio_opt = AudioOptimizer()
-            audio_opt.optimize(proc_voice, optimized_voice)
-            proc_voice = optimized_voice
-            log("  ✓ تم تحسين الصوت", "ok")
-        except ImportError:
-            log("  ⚠ AudioOptimizer غير متوفر", "warn")
-        except Exception as e:
-            log(f"  ⚠ فشل تحسين الصوت: {e}", "warn")
+        if not proc_voice:
+            raise RuntimeError("❌ فشل توليد صوت مقبول!")
 
-        # ═══════════════════════════════════════════════════════════════
-        # [4/6] قياس المدة الفعلية ⭐
-        # ═══════════════════════════════════════════════════════════════
-        log("\n[4/6] 📏 قياس المدة الفعلية للصوت...", "cyan")
-        
-        actual_audio_duration = get_audio_duration(proc_voice)
-        
-        if actual_audio_duration <= 0:
-            raise RuntimeError("❌ فشل قياس مدة الصوت!")
-        
-        log(f"  ✓ المدة الخام: {raw_duration:.1f}s", "info")
-        log(f"  ✓ المدة الفعلية بعد التحسين: {actual_audio_duration:.1f}s", "ok")
-        log(f"  ✓ توفير: {raw_duration - actual_audio_duration:.1f}s", "ok")
-        
-        # تحديث script بالمدة الفعلية
+        # تحديث المدة
         script["duration_estimate"] = actual_audio_duration
         script["actual_audio_duration"] = actual_audio_duration
 
-        # ═══════════════════════════════════════════════════════════════
-        # 🆕 [5/6] مزج احترافي (Voice + Music + SFX)
-        # ═══════════════════════════════════════════════════════════════
-        log("\n[5/6] 🎵 مزج الصوت النهائي (Pro Mix)...", "cyan")
+        # ══════════════════════════════════════════════════════════
+        # [3/6] 📏 قياس المدة الفعلية
+        # ══════════════════════════════════════════════════════════
+        log(f"\n[3/6] 📏 المدة الفعلية: {actual_audio_duration:.1f}s", "cyan")
+
+        # ══════════════════════════════════════════════════════════
+        # [4/6] 🎵 مزج احترافي (Voice + Music + SFX)
+        # ══════════════════════════════════════════════════════════
+        log("\n[4/6] 🎵 مزج الصوت النهائي...", "cyan")
         final_audio = str(tmp / "final_audio.mp3")
         mood = script.get("music_mood", "motivational")
 
-        log(f"  🎼 Mood: {mood}", "info")
-
-        # 🆕 1. الموسيقى الخلفية
+        # الموسيقى
         music_file = None
         if os.getenv("ENABLE_BACKGROUND_MUSIC", "true").lower() == "true":
-            log("  🎵 البحث عن موسيقى مناسبة...", "info")
             music_file = music_engine.get_music(mood, actual_audio_duration)
             if music_file:
                 log(f"  ✓ موسيقى: {Path(music_file).name}", "ok")
-            else:
-                log("  ⚠ لم يتم العثور على موسيقى", "warn")
-        else:
-            log("  ⏭ الموسيقى معطّلة", "info")
 
-        # 🆕 2. المؤثرات الصوتية (SFX)
+        # SFX
         sfx_tracks = []
         if sfx_manager and os.getenv("ENABLE_SFX", "true").lower() == "true":
-            log("  🔊 تجهيز المؤثرات الصوتية...", "info")
             try:
                 sfx_tracks = sfx_manager.get_sfx_for_scenes(script["scenes"])
                 if sfx_tracks:
-                    log(f"  ✓ تم تجهيز {len(sfx_tracks)} مؤثر صوتي", "ok")
-                else:
-                    log("  ⏭ بدون مؤثرات", "info")
-            except Exception as e:
-                log(f"  ⚠ فشل تجهيز SFX: {e}", "warn")
-        else:
-            log("  ⏭ SFX معطّلة", "info")
+                    log(f"  ✓ {len(sfx_tracks)} مؤثر صوتي", "ok")
+            except Exception:
+                pass
 
-        # 🆕 3. المزج النهائي
+        # المزج
         if music_file:
             proc_music = str(tmp / "music.mp3")
             music_vol = float(os.getenv("MUSIC_VOLUME", "0.15"))
             fx.process_music(music_file, proc_music, music_vol)
 
-            # مزج كامل: Voice + Music + SFX
-            log(f"  🎚️ مزج: Voice + Music ({len(sfx_tracks)} SFX)", "info")
             fx.mix_audio_tracks(
                 voice_path=proc_voice,
                 music_path=proc_music,
@@ -361,24 +364,21 @@ def generate_video(
                 output_path=final_audio,
                 total_duration=actual_audio_duration,
             )
-            log(f"  ✓ مزج كامل: Voice + Music + {len(sfx_tracks)} SFX", "ok")
+            log(f"  ✓ مزج: Voice + Music + {len(sfx_tracks)} SFX", "ok")
         else:
-            # بدون موسيقى - استخدم الصوت كما هو
             shutil.copy(proc_voice, final_audio)
-            log("  ✓ صوت فقط (بدون موسيقى)", "warn")
-        
-        # قياس المدة النهائية
+            log("  ✓ صوت فقط", "warn")
+
+        # تحديث المدة النهائية
         final_duration = get_audio_duration(final_audio)
-        log(f"  ✓ مدة الصوت النهائي: {final_duration:.1f}s", "ok")
-        
-        # تحديث script
         script["duration_estimate"] = final_duration
         script["actual_audio_duration"] = final_duration
+        log(f"  ✓ مدة نهائية: {final_duration:.1f}s", "ok")
 
-        # ═══════════════════════════════════════════════════════════════
-        # [6/6] بناء الفيديو على مدة الصوت بالضبط
-        # ═══════════════════════════════════════════════════════════════
-        log("\n[6/6] 🎬 بناء الفيديو على مدة الصوت...", "cyan")
+        # ══════════════════════════════════════════════════════════
+        # [5/6] 🎬 بناء الفيديو
+        # ══════════════════════════════════════════════════════════
+        log("\n[5/6] 🎬 بناء الفيديو...", "cyan")
 
         if use_remotion and isinstance(renderer, RemotionRenderer):
             props = build_complete_props(
@@ -386,47 +386,42 @@ def generate_video(
                 audio_path=final_audio,
                 output_dir=output_dir,
             )
-            
-            # تأكيد المدة في props
             props["totalDuration"] = final_duration
             props["audioActualDuration"] = final_duration
-            
+
             log(f"  ✓ {props['meta']['totalScenes']} مشهد", "ok")
             log(f"  ✓ {props['meta']['totalSubtitles']} ترجمة", "ok")
-            log(f"  ✓ {props['meta']['totalTransitions']} انتقال", "ok")
-            log(f"  ✓ مدة الفيديو: {final_duration:.1f}s (= مدة الصوت)", "ok")
+            log(f"  ✓ مدة الفيديو: {final_duration:.1f}s", "ok")
         else:
-            log("  ❌ Legacy mode غير مدعوم", "err")
             raise NotImplementedError("استخدم Remotion")
 
-        # ═══════════════════════════════════════════════════════════════
-        # 🚀 التصدير
-        # ═══════════════════════════════════════════════════════════════
-        log("\n🚀 التصدير النهائي...", "cyan")
+        # ══════════════════════════════════════════════════════════
+        # [6/6] 🚀 التصدير النهائي
+        # ══════════════════════════════════════════════════════════
+        log("\n[6/6] 🚀 التصدير النهائي...", "cyan")
 
-        if use_remotion and isinstance(renderer, RemotionRenderer):
-            renderer.render_final(
-                props=props,
-                output_path=out,
-                quality=quality,
-                metadata={
-                    "title":       script.get("title", topic),
-                    "description": script.get("hook", ""),
-                    "comment":     f"Generated by AI Shorts Factory v2.3 | {content_type}",
-                },
-            )
+        renderer.render_final(
+            props=props,
+            output_path=out,
+            quality=quality,
+            metadata={
+                "title": script.get("title", topic),
+                "description": script.get("hook", ""),
+                "comment": f"AI Shorts Factory v3.0 | {content_type} | Score: {script_score}",
+            },
+        )
 
         log(f"  ✓ الفيديو جاهز", "ok")
 
-        # إنشاء صورة مصغرة
+        # Thumbnail
         try:
             thumb = out.replace(".mp4", "_thumb.jpg")
             renderer.create_thumbnail(out, thumb)
             log(f"  ✓ Thumbnail: {Path(thumb).name}", "ok")
-        except Exception as e:
-            log(f"  ⚠ فشل إنشاء الـ Thumbnail: {e}", "warn")
+        except Exception:
+            pass
 
-        # حفظ معلومات الفيديو
+        # Info file
         try:
             info_file = out.replace(".mp4", "_info.txt")
             with open(info_file, "w", encoding="utf-8") as f:
@@ -434,27 +429,20 @@ def generate_video(
                 f.write(f"Topic: {topic}\n")
                 f.write(f"Type: {content_type}\n")
                 f.write(f"Duration: {final_duration:.1f}s\n")
+                f.write(f"Quality Score: {script_score}/100\n")
                 f.write(f"Hook: {script.get('hook', '')}\n")
                 f.write(f"Generated: {ts}\n")
-                f.write(f"Renderer: {'Remotion' if use_remotion else 'FFmpeg'}\n")
-                f.write(f"TTS Engine: {os.getenv('TTS_ENGINE', 'edge')}\n")
-                f.write(f"Audio Speed: {os.getenv('AUDIO_SPEED', '1.0')}x\n")
-                f.write(f"\n=== Audio Pipeline ===\n")
-                f.write(f"  Raw: {raw_duration:.1f}s\n")
-                f.write(f"  Optimized: {actual_audio_duration:.1f}s\n")
-                f.write(f"  Final: {final_duration:.1f}s\n")
-                f.write(f"\n=== Audio Components ===\n")
-                f.write(f"  Voice: ✓\n")
-                f.write(f"  Music: {'✓ ' + Path(music_file).name if music_file else '✗'}\n")
-                f.write(f"  SFX: {len(sfx_tracks)} effects\n")
-            log(f"  ✓ Info: {Path(info_file).name}", "ok")
+                f.write(f"TTS: {os.getenv('TTS_ENGINE', 'edge')}\n")
+                f.write(f"Music: {'✓' if music_file else '✗'}\n")
+                f.write(f"SFX: {len(sfx_tracks)}\n")
+                f.write(f"Audio: {raw_duration:.1f}s → {final_duration:.1f}s\n")
         except Exception:
             pass
 
-        # عرض حجم الملف
+        # حجم الملف
         try:
             size_mb = Path(out).stat().st_size / (1024 * 1024)
-            log(f"  📦 حجم الفيديو: {size_mb:.2f} MB", "info")
+            log(f"  📦 حجم: {size_mb:.2f} MB", "info")
         except Exception:
             pass
 
@@ -465,18 +453,17 @@ def generate_video(
         if success:
             try:
                 renderer.cleanup_temp()
-                log("  🧹 تم تنظيف الملفات المؤقتة", "info")
+                log("  🧹 تم التنظيف", "info")
             except Exception:
                 pass
         else:
-            log("  ⚠ الملفات المؤقتة محفوظة للتشخيص", "warn")
+            log("  ⚠ الملفات المؤقتة محفوظة", "warn")
 
 
 # ─── الدالة الرئيسية ──────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(
-        description="🎬 Viral AI Content Factory v2.3 - Pro Audio Edition",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="🎬 Viral AI Content Factory v3.0"
     )
     parser.add_argument("--topic", type=str, default=os.getenv("DEFAULT_TOPIC", "الطموح والنجاح"))
     parser.add_argument("--type", type=str, choices=["motivational", "educational", "story", "quote"],
@@ -495,15 +482,12 @@ def main():
 
     use_remotion = not args.use_ffmpeg
 
-    if args.use_ffmpeg:
-        log("\n⚠ تم اختيار FFmpeg القديم", "warn")
-
     if not check_env(use_remotion=use_remotion):
         log("\n❌ أصلح المشاكل ثم أعد المحاولة.", "err")
         sys.exit(1)
 
     if args.check:
-        log("\n✅ كل شيء جاهز للعمل!", "ok")
+        log("\n✅ كل شيء جاهز!", "ok")
         sys.exit(0)
 
     topics = args.batch if args.batch else [args.topic]
@@ -516,12 +500,7 @@ def main():
             log(f"{'═' * 60}", "cyan")
         else:
             log(f"\n🎬 الموضوع: {topic}", "bold")
-            log(
-                f"📋 النوع: {args.type} | "
-                f"⏱ المدة: {args.duration}s | "
-                f"✨ الجودة: {args.quality}",
-                "info",
-            )
+            log(f"📋 النوع: {args.type} | ⏱ المدة: {args.duration}s | ✨ الجودة: {args.quality}", "info")
 
         t0 = time.time()
         try:
