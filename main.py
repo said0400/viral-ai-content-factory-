@@ -63,10 +63,10 @@ def banner() -> None:
     log("━" * 60, "cyan")
 
 # ─── إعدادات الجودة ───────────────────────────────────────────────────────
-MIN_SCRIPT_SCORE = 60           # الحد الأدنى لقبول السكربت
+MIN_SCRIPT_SCORE = 40           # الحد الأدنى لقبول السكربت
 MIN_AUDIO_COVERAGE = 50         # الحد الأدنى لتغطية الصوت (%)
-MAX_SCRIPT_RETRIES = 3          # أقصى محاولات لتوليد سكربت جيد
-MAX_AUDIO_RETRIES = 2           # أقصى محاولات لتوليد صوت كامل
+MAX_SCRIPT_RETRIES = 2          # أقصى محاولات لتوليد سكربت جيد
+MAX_AUDIO_RETRIES = 1           # أقصى محاولات لتوليد صوت كامل
 
 
 def check_env(use_remotion: bool = True) -> bool:
