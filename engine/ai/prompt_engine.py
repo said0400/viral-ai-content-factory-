@@ -334,7 +334,9 @@ class PromptEngine:
    ✓ مصطلحات يفهمها العامة
    ✓ بدون تعقيد لغوي
 
-2️⃣ **المدة:** {min_dur}-{max_dur} ثانية
+2️⃣ **المدة:** {target_duration} ثانية بالضبط
+   ✓ عدد الكلمات الإجمالي: {self._get_word_count(target_duration)} كلمة (مهم جداً!)
+   ✓ كل مشهد: {min_words}-{max_words} كلمات
 
 3️⃣ **عدد المشاهد:** {min_scenes}-{max_scenes} مشهد
 
