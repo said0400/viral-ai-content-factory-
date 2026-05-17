@@ -35,9 +35,9 @@ class TextValidator:
 
     # ─── معايير الطول حسب المدة ────────────────────────────────
     DURATION_WORD_MAP = {
-        30: {"min_words": 55, "max_words": 85, "min_scenes": 5, "max_scenes": 8},
-        45: {"min_words": 85, "max_words": 130, "min_scenes": 7, "max_scenes": 12},
-        60: {"min_words": 120, "max_words": 170, "min_scenes": 9, "max_scenes": 15},
+        30: {"min_words": 25, "max_words": 85, "min_scenes": 5, "max_scenes": 8},
+        45: {"min_words": 40, "max_words": 130, "min_scenes": 7, "max_scenes": 12},
+        60: {"min_words": 50, "max_words": 170, "min_scenes": 9, "max_scenes": 15},
     }
 
     # ─── كلمات القيمة (يجب أن يحتوي النص على بعضها) ───────────
@@ -379,7 +379,7 @@ class DurationController:
 
     DURATION_SPECS = {
         30: {
-            "min_words": 55,
+            "min_words": 25,
             "max_words": 85,
             "ideal_words": 70,
             "min_scenes": 5,
@@ -389,7 +389,7 @@ class DurationController:
             "description": "قصير وسريع - TikTok style",
         },
         45: {
-            "min_words": 85,
+            "min_words": 40,
             "max_words": 130,
             "ideal_words": 105,
             "min_scenes": 7,
@@ -399,7 +399,7 @@ class DurationController:
             "description": "متوسط - متوازن",
         },
         60: {
-            "min_words": 120,
+            "min_words": 50,
             "max_words": 170,
             "ideal_words": 145,
             "min_scenes": 9,
