@@ -1,0 +1,25 @@
+# ╔═══════════════════════════════════════════════════════════════════╗
+# ║              🪶 Minimal Requirements                              ║
+# ╚═══════════════════════════════════════════════════════════════════╝
+#
+# الحد الأدنى للتشغيل (بدون Whisper, ElevenLabs, إلخ)
+#
+# Install:
+#   pip install -r requirements-minimal.txt
+#
+
+# AI (Required)
+groq>=0.11.0,<1.0.0
+
+# TTS (Edge فقط - مجاني)
+edge-tts>=6.1.10,<7.0.0
+
+# Audio
+pydub>=0.25.1,<1.0.0
+
+# Network
+requests>=2.32.0,<3.0.0
+
+# Utilities
+python-dotenv>=1.0.1,<2.0.0
+tqdm>=4.66.4,<5.0.0
