@@ -114,7 +114,7 @@ Config.setConcurrency(getConcurrency());
 Config.setTimeoutInMilliseconds(ENV.TIMEOUT_MS);
 
 // Number of frame buffer
-Config.setNumberOfGifLoops(0); // 0 = infinite for GIFs
+// Config.setNumberOfGifLoops(0);  // ← فقط للـ GIFs، ليس MP4
 
 // ═══════════════════════════════════════════════════════════════
 // 🌐 Chromium / Browser
