@@ -1,34 +1,113 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "commonjs",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "jsx": "react",
+    /* ═══════════════════════════════════════════════════════════
+     * Target & Module
+     * ═══════════════════════════════════════════════════════════ */
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    
+    /* ═══════════════════════════════════════════════════════════
+     * JSX (React 18)
+     * ═══════════════════════════════════════════════════════════ */
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    
+    /* ═══════════════════════════════════════════════════════════
+     * Strict Type Checking ⭐
+     * ═══════════════════════════════════════════════════════════ */
     "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "moduleResolution": "node",
-    "allowSyntheticDefaultImports": true,
-    "noImplicitAny": false,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "useUnknownInCatchVariables": true,
+    
+    /* ═══════════════════════════════════════════════════════════
+     * Additional Checks
+     * ═══════════════════════════════════════════════════════════ */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    "outDir": "./dist",
-    "baseUrl": "./src",
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "allowUnusedLabels": false,
+    "allowUnreachableCode": false,
+    
+    /* ═══════════════════════════════════════════════════════════
+     * Module Resolution
+     * ═══════════════════════════════════════════════════════════ */
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    "forceConsistentCasingInFileNames": true,
+    
+    /* ═══════════════════════════════════════════════════════════
+     * Emit
+     * ═══════════════════════════════════════════════════════════ */
+    "noEmit": true,
+    "sourceMap": true,
+    "declaration": false,
+    "removeComments": false,
+    "preserveConstEnums": true,
+    
+    /* ═══════════════════════════════════════════════════════════
+     * Skip Checks (Performance)
+     * ═══════════════════════════════════════════════════════════ */
+    "skipLibCheck": true,
+    
+    /* ═══════════════════════════════════════════════════════════
+     * Incremental Compilation
+     * ═══════════════════════════════════════════════════════════ */
+    "incremental": true,
+    "tsBuildInfoFile": ".tsbuildinfo",
+    
+    /* ═══════════════════════════════════════════════════════════
+     * Path Aliases
+     * ═══════════════════════════════════════════════════════════ */
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["*"],
-      "@components/*": ["components/*"],
-      "@compositions/*": ["compositions/*"]
-    }
+      "@/*": ["src/*"],
+      "@components/*": ["src/components/*"],
+      "@compositions/*": ["src/compositions/*"],
+      "@utils/*": ["src/utils/*"],
+      "@hooks/*": ["src/hooks/*"],
+      "@types/*": ["src/types/*"],
+      "@constants/*": ["src/constants/*"]
+    },
+    
+    /* ═══════════════════════════════════════════════════════════
+     * Type Definitions
+     * ═══════════════════════════════════════════════════════════ */
+    "types": ["node", "react", "react-dom"]
   },
+  
   "include": [
-    "src/**/*",
+    "src/**/*.ts",
+    "src/**/*.tsx",
     "remotion.config.ts"
   ],
+  
   "exclude": [
     "node_modules",
     "dist",
-    "out"
-  ]
+    "out",
+    ".remotion",
+    "public",
+    "**/*.spec.ts",
+    "**/*.test.ts"
+  ],
+  
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node"
+  }
 }
