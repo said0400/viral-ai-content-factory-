@@ -1,140 +1,184 @@
 /**
- * 🎯 TypeScript Types & Interfaces
+ * 🎯 TypeScript Types & Interfaces v2.0
  * ═══════════════════════════════════════════════════════════════
  * كل الـ types المستخدمة في المشروع
- * 
+ *
  * هذه الـ types تتطابق مع البيانات الواردة من Python
  * (engine/video/cinematic_editor.py → build_props_for_remotion)
  * ═══════════════════════════════════════════════════════════════
  */
 
-// ════════════════════════════════════════════════════════════════════
-// 🎬 أنواع المشاهد
-// ════════════════════════════════════════════════════════════════════
-export type SceneType =
-  | "hook"        // افتتاحية قوية
-  | "build"       // بناء وتطوير
-  | "peak"        // ذروة
-  | "resolution"  // حل
-  | "cta"         // call to action
-  | "main"        // مشهد عام
-  | "intro"       // مقدمة
-  | "outro";      // خاتمة
+import type { ReactNode } from 'react';
 
-// ════════════════════════════════════════════════════════════════════
-// 🎨 أنواع التأثيرات
-// ════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// 🎬 Scene Types
+// ═══════════════════════════════════════════════════════════════
+export type SceneType =
+  | 'hook'
+  | 'build'
+  | 'peak'
+  | 'resolution'
+  | 'cta'
+  | 'main'
+  | 'intro'
+  | 'outro';
+
+// ═══════════════════════════════════════════════════════════════
+// 🎨 Effect Types
+// ═══════════════════════════════════════════════════════════════
 export type ZoomType =
-  | "slow_zoom_in"
-  | "slow_zoom_out"
-  | "punch_zoom"
-  | "drift_right"
-  | "drift_left"
-  | "drift_up"
-  | "drift_down"
-  | "static";
+  | 'slow_zoom_in'
+  | 'slow_zoom_out'
+  | 'punch_zoom'
+  | 'drift_right'
+  | 'drift_left'
+  | 'drift_up'
+  | 'drift_down'
+  | 'static';
 
 export type TransitionType =
-  | "none"
-  | "fade"
-  | "fade-black"
-  | "fade-white"
-  | "smooth-fade"
-  | "dissolve"
-  | "slide-up"
-  | "slide-down"
-  | "slide-left"
-  | "slide-right"
-  | "wipe-up"
-  | "wipe-down"
-  | "wipe-left"
-  | "wipe-right"
-  | "zoom-in"
-  | "zoom-out"
-  | "iris-open"
-  | "iris-close"
-  | "iris-burst"
-  | "flip-horizontal"
-  | "flip-vertical"
-  | "clock-wipe"
-  | "pixelate";
+  | 'none'
+  | 'fade'
+  | 'fade-black'
+  | 'fade-white'
+  | 'smooth-fade'
+  | 'dissolve'
+  | 'slide-up'
+  | 'slide-down'
+  | 'slide-left'
+  | 'slide-right'
+  | 'wipe-up'
+  | 'wipe-down'
+  | 'wipe-left'
+  | 'wipe-right'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'iris-open'
+  | 'iris-close'
+  | 'iris-burst'
+  | 'flip-horizontal'
+  | 'flip-vertical'
+  | 'clock-wipe'
+  | 'pixelate';
 
 export type GradeStyle =
-  | "cinematic_warm"
-  | "cinematic_cool"
-  | "dramatic_dark"
-  | "natural"
-  | "off";
+  | 'cinematic_warm'
+  | 'cinematic_cool'
+  | 'dramatic_dark'
+  | 'bright_vibrant'
+  | 'emotional_soft'
+  | 'natural'
+  | 'off';
 
 export type SubtitleStylePreset =
-  | "cinematic"
-  | "modern"
-  | "highlight"
-  | "minimal";
+  | 'cinematic'
+  | 'modern'
+  | 'highlight'
+  | 'minimal'
+  | 'bold'
+  | 'karaoke';
 
-export type Quality = "medium" | "high" | "ultra";
+export type LetterboxStyle =
+  | 'cinematic'
+  | 'thin'
+  | 'thick'
+  | 'imax'
+  | 'widescreen'
+  | 'off';
+
+export type Quality = 'draft' | 'medium' | 'high' | 'ultra';
 
 export type EasingType =
-  | "linear"
-  | "ease-in"
-  | "ease-out"
-  | "ease-in-out";
+  | 'linear'
+  | 'ease-in'
+  | 'ease-out'
+  | 'ease-in-out';
 
-// ════════════════════════════════════════════════════════════════════
-// 📝 الترجمات
-// ════════════════════════════════════════════════════════════════════
+export type SubtitleMode = 'scene' | 'tiktok';
+
+export type VoiceTone =
+  | 'whisper'
+  | 'calm'
+  | 'cold'
+  | 'emotionless'
+  | 'sad'
+  | 'curious'
+  | 'authoritative'
+  | 'intense'
+  | 'aggressive'
+  | 'powerful';
+
+// ═══════════════════════════════════════════════════════════════
+// 📝 Subtitles
+// ═══════════════════════════════════════════════════════════════
 export interface WordTiming {
-  text: string;
-  start: number;  // بالثانية
-  end: number;
+  /** نص الكلمة (الاسم المفضّل) */
+  text?: string;
+  /** نص الكلمة (للتوافق مع Whisper) */
+  word?: string;
+  start: number;  // seconds
+  end: number;    // seconds
+  probability?: number;  // من Whisper
 }
 
 export interface Subtitle {
   id: number;
   text: string;
-  start: number;       // وقت البداية بالثانية
-  end: number;         // وقت النهاية
-  duration: number;    // المدة
-  sceneId: number;     // معرف المشهد
-  words?: WordTiming[]; // اختياري - لتأثير Karaoke
+  start: number;
+  end: number;
+  duration: number;
+  sceneId: number;
+  
+  /** للـ Karaoke effect (اختياري) */
+  words?: WordTiming[];
+  
+  /** override style لهذه الترجمة فقط */
+  styleOverride?: string;
+}
+
+export interface SubtitleStyleStroke {
+  width: number;
+  color: string;
+}
+
+export interface SubtitleStyleGlow {
+  enabled: boolean;
+  color: string;
+  blur: number;
 }
 
 export interface SubtitleStyle {
   preset?: SubtitleStylePreset;
-  fontSize: number;
-  fontWeight: number | string;
-  fontFamily: string;
-  color: string;
+  fontSize?: number;
+  fontWeight?: number | string;
+  fontFamily?: string;
+  color?: string;
   backgroundColor?: string;
   textShadow?: string;
   borderRadius?: number;
   padding?: string;
   lineHeight?: number;
   letterSpacing?: string;
-  direction?: "rtl" | "ltr";
-  textAlign?: "left" | "center" | "right";
-  position?: "top" | "center" | "bottom";
-  positionOffset?: number; // 0-1 (نسبة من الارتفاع)
-  stroke?: {
-    width: number;
-    color: string;
-  };
-  glow?: {
-    enabled: boolean;
-    color: string;
-    blur: number;
-  };
+  direction?: 'rtl' | 'ltr';
+  textAlign?: 'left' | 'center' | 'right';
+  position?: 'top' | 'center' | 'bottom';
+  positionOffset?: number;  // 0-1
+  stroke?: SubtitleStyleStroke;
+  glow?: SubtitleStyleGlow;
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 🎬 المشاهد
-// ════════════════════════════════════════════════════════════════════
-export interface SceneEffects {
+// ═══════════════════════════════════════════════════════════════
+// 🎬 Scenes
+// ═══════════════════════════════════════════════════════════════
+export interface SceneEffectsConfig {
   sceneType?: string;
   zoom?: ZoomConfig;
   shake?: ShakeConfig;
   grade?: GradeConfig;
   letterbox?: LetterboxConfig;
+  transition?: TransitionConfig;
+  fadeIn?: boolean;
+  fadeOut?: boolean;
 }
 
 export interface Scene {
@@ -150,35 +194,71 @@ export interface Scene {
   zoomEffect: ZoomType;
   transitionIn: TransitionType;
   shake: boolean;
+  
+  /** Visual prompt للـ AI */
   visualPrompt?: string;
-  effectsConfig?: SceneEffects;
+  
+  /** Effects config لهذا المشهد */
+  effectsConfig?: SceneEffectsConfig;
+  
+  /** مستوى الطاقة (للـ peak effects) */
+  energy?: number;  // 0-1
+  
+  /** نبرة الصوت */
+  voiceTone?: VoiceTone;
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 🔄 الانتقالات
-// ════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// 🔄 Transitions
+// ═══════════════════════════════════════════════════════════════
 export interface Transition {
   fromScene: number;
   toScene: number;
-  name: TransitionType;
+  name: TransitionType | string;
   duration: number;
-  easing?: EasingType;
-  color?: string;        // للـ fade-black, fade-white
-  direction?: string;    // للـ slide, wipe
-  scaleFrom?: number;    // للـ zoom
+  easing?: EasingType | string;
+  
+  /** للـ fade-black, fade-white */
+  color?: string;
+  
+  /** للـ slide, wipe */
+  direction?: string;
+  
+  /** للـ zoom */
+  scaleFrom?: number;
   scaleTo?: number;
-  shape?: string;        // للـ iris
+  
+  /** للـ iris */
+  shape?: string;
   scale?: number;
-  axis?: "x" | "y";      // للـ flip
-  pixelSize?: number;    // للـ pixelate
+  
+  /** للـ flip */
+  axis?: 'x' | 'y';
+  
+  /** للـ pixelate */
+  pixelSize?: number;
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 🎨 التأثيرات البصرية
-// ════════════════════════════════════════════════════════════════════
+export interface TransitionConfig {
+  name: string;
+  duration: number;
+  easing: string;
+  direction?: string;
+  color?: string;
+  scaleFrom?: number;
+  scaleTo?: number;
+  shape?: string;
+  scale?: number;
+  axis?: string;
+  pixelSize?: number;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 🎨 Visual Effects
+// ═══════════════════════════════════════════════════════════════
 export interface ZoomConfig {
   name: string;
-  type?: "scale" | "translate" | "none";
+  type?: 'scale' | 'translate' | 'none';
   from?: number;
   to?: number;
   scale?: number;
@@ -200,14 +280,16 @@ export interface ShakeConfig {
   frequencyY?: number;
 }
 
+export interface GradeTint {
+  r: number;
+  g: number;
+  b: number;
+}
+
 export interface GradeConfig {
   name: string;
   filter?: string;
-  tint?: {
-    r: number;
-    g: number;
-    b: number;
-  };
+  tint?: GradeTint;
   vignette?: boolean;
   vignetteIntensity?: number;
   grain?: boolean;
@@ -217,7 +299,7 @@ export interface GradeConfig {
 export interface LetterboxConfig {
   name: string;
   enabled: boolean;
-  barRatio?: number;     // 0-1 (نسبة من الارتفاع)
+  barRatio?: number;  // 0-1
   color?: string;
   opacity?: number;
 }
@@ -248,91 +330,99 @@ export interface BlurConfig {
   filter: string;
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 🌟 التأثيرات العامة
-// ════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// 🌟 Global Effects
+// ═══════════════════════════════════════════════════════════════
+export interface FadeEffectsContainer {
+  fadeIn: FadeConfig;
+  fadeOut: FadeConfig;
+}
+
 export interface GlobalEffects {
   grade?: GradeConfig;
   letterbox?: LetterboxConfig;
-  fade?: {
-    fadeIn: FadeConfig;
-    fadeOut: FadeConfig;
-  };
+  fade?: FadeEffectsContainer;
   flash?: FlashConfig;
   glitch?: GlitchConfig;
   blur?: BlurConfig;
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 🎨 التصميم العام
-// ════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// 🎨 Design Config
+// ═══════════════════════════════════════════════════════════════
 export interface DesignConfig {
-  fontFamily: string;
-  fontWeight: number | string;
-  primaryColor: string;
-  accentColor: string;
-  shadowColor: string;
-  backgroundOverlay: string;
-  letterboxEnabled: boolean;
-  cinematicGrade: boolean;
+  fontFamily?: string;
+  fontWeight?: number | string;
+  primaryColor?: string;
+  accentColor?: string;
+  shadowColor?: string;
+  backgroundOverlay?: string;
+  letterboxEnabled?: boolean;
+  cinematicGrade?: boolean;
+  subtitleMode?: SubtitleMode;
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 📊 الميتاداتا
-// ════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// 📊 Metadata
+// ═══════════════════════════════════════════════════════════════
 export interface VideoMeta {
   totalScenes: number;
   totalSubtitles: number;
   totalTransitions: number;
-  engines?: {
-    [key: string]: any;
-  };
+  hasEffects?: boolean;
+  hasWhisper?: boolean;
+  mood?: string;
+  engines?: Record<string, unknown>;
   version: string;
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 🎬 الـ Props الرئيسي للفيديو (يأتي من Python)
-// ════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// 🎬 Main VideoProps
+// ═══════════════════════════════════════════════════════════════
 export interface VideoProps {
-  // المعلومات الأساسية
+  // ── المعلومات الأساسية ──
   title: string;
   totalDuration: number;
   fps: number;
   width: number;
   height: number;
-  quality: Quality;
-
-  // الصوت
-  audioPath: string;
-
-  // المحتوى
+  quality?: Quality;
+  
+  // ── الصوت ──
+  audioPath?: string;
+  audioActualDuration?: number;
+  
+  // ── المحتوى ──
   scenes: Scene[];
   subtitles: Subtitle[];
-  transitions: Transition[];
-
-  // التأثيرات والتصميم
-  effects: GlobalEffects;
-  subtitleStyle: SubtitleStyle;
-  design: DesignConfig;
-
-  // الميتاداتا
-  meta: VideoMeta;
+  transitions?: Transition[];
+  
+  // ── التأثيرات والتصميم (optional) ──
+  effects?: GlobalEffects;
+  subtitleStyle?: SubtitleStyle;
+  design?: DesignConfig;
+  
+  // ── الميتاداتا ──
+  meta?: VideoMeta;
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 🎯 Props للمكونات الفرعية
-// ════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// 🎯 Component Props
+// ═══════════════════════════════════════════════════════════════
 export interface SceneRendererProps {
   scene: Scene;
   isActive: boolean;
   fps: number;
   effects?: GlobalEffects;
+  fadeInFrames?: number;
+  fadeOutFrames?: number;
+  applyColorGrade?: boolean;
 }
 
 export interface ArabicSubtitleProps {
   subtitle: Subtitle;
-  style: SubtitleStyle;
-  isVisible: boolean;
+  style?: Partial<SubtitleStyle>;
+  isVisible?: boolean;
   videoWidth: number;
   videoHeight: number;
 }
@@ -342,8 +432,15 @@ export interface BackgroundVideoProps {
   duration: number;
   zoomEffect?: ZoomType;
   shake?: boolean;
+  shakeIntensity?: number;
   width: number;
   height: number;
+  overlayColor?: string;
+  overlayOpacity?: number;
+  filter?: string;
+  startFrom?: number;
+  playbackRate?: number;
+  objectPosition?: string;
 }
 
 export interface AudioTrackProps {
@@ -351,22 +448,107 @@ export interface AudioTrackProps {
   volume?: number;
   startFrom?: number;
   endAt?: number;
+  fadeInDuration?: number;
+  fadeOutDuration?: number;
+  loop?: boolean;
+  playbackRate?: number;
+  startInVideo?: number;
+  durationInVideo?: number;
+  muted?: boolean;
 }
 
 export interface LetterboxProps {
   config: LetterboxConfig;
   width: number;
   height: number;
+  orientation?: 'horizontal' | 'vertical' | 'both';
+  animation?: 'slide' | 'fade' | 'none';
+  slideInFrames?: number;
+  slideOut?: boolean;
+  slideOutFrames?: number;
+  showSeparatorLine?: boolean;
+  separatorColor?: string;
+  zIndex?: number;
 }
 
 export interface ColorGradeProps {
-  config: GradeConfig;
-  children: React.ReactNode;
+  config?: GradeConfig | null;
+  children: ReactNode;
+  tintOpacity?: number;
+  blendMode?: React.CSSProperties['mixBlendMode'];
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 📦 Export All
-// ════════════════════════════════════════════════════════════════════
-export type {
-  // Re-export for convenience
+// ═══════════════════════════════════════════════════════════════
+// 🎯 Type Guards & Utilities
+// ═══════════════════════════════════════════════════════════════
+/**
+ * Type guard للتحقق من Scene صحيح
+ */
+export const isValidScene = (scene: unknown): scene is Scene => {
+  if (!scene || typeof scene !== 'object') return false;
+  const s = scene as Scene;
+  return (
+    typeof s.id === 'number' &&
+    typeof s.type === 'string' &&
+    typeof s.text === 'string' &&
+    typeof s.duration === 'number'
+  );
 };
+
+/**
+ * Type guard للتحقق من Subtitle صحيح
+ */
+export const isValidSubtitle = (sub: unknown): sub is Subtitle => {
+  if (!sub || typeof sub !== 'object') return false;
+  const s = sub as Subtitle;
+  return (
+    typeof s.id === 'number' &&
+    typeof s.text === 'string' &&
+    typeof s.start === 'number' &&
+    typeof s.end === 'number'
+  );
+};
+
+/**
+ * Get word text (يدعم word.text و word.word)
+ */
+export const getWordText = (word: WordTiming): string => {
+  return word.text || word.word || '';
+};
+
+// ═══════════════════════════════════════════════════════════════
+// 🎯 Default Values
+// ═══════════════════════════════════════════════════════════════
+export const DEFAULT_SCENE: Partial<Scene> = {
+  type: 'main',
+  duration: 3,
+  pauseAfter: 0.3,
+  zoomEffect: 'slow_zoom_in',
+  transitionIn: 'fade',
+  shake: false,
+  energy: 0.5,
+};
+
+export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
+  preset: 'cinematic',
+  fontSize: 78,
+  fontWeight: 900,
+  fontFamily: "'Cairo', 'Tajawal', 'Almarai', sans-serif",
+  color: '#FFFFFF',
+  backgroundColor: 'rgba(0,0,0,0)',
+  textShadow: '0 4px 20px rgba(0,0,0,0.95), 0 0 40px rgba(0,0,0,0.8)',
+  padding: '0 60px',
+  lineHeight: 1.4,
+  letterSpacing: '0em',
+  direction: 'rtl',
+  textAlign: 'center',
+  position: 'bottom',
+  positionOffset: 0.78,
+};
+
+export const DEFAULT_VIDEO_CONFIG = {
+  width: 1080,
+  height: 1920,
+  fps: 30,
+  quality: 'high' as Quality,
+} as const;
