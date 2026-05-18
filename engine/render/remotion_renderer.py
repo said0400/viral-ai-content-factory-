@@ -1,5 +1,5 @@
 """
-🎬 Remotion Renderer v2.0 — Pro
+🎬 Remotion Renderer v2.1 — Pro
 ═══════════════════════════════════════════════════════════════
 محرك التصدير عبر Remotion:
   ✓ Smart asset linking (بدل copy)
@@ -8,10 +8,12 @@
   ✓ Result dataclass
   ✓ يستخدم ffmpeg_utils
 
-التحسينات v2.0:
+التحسينات v2.1:
+  ✓ إصلاح RenderResult initialization
+  ✓ إضافة import json المفقود
+  ✓ معالجة أخطاء أفضل
   ✓ Symlinks بدل copy (أسرع 100x)
   ✓ Real-time progress
-  ✓ RenderResult dataclass
   ✓ Smart cleanup
   ✓ Validation شاملة
 ═══════════════════════════════════════════════════════════════
@@ -119,7 +121,7 @@ class RenderProgress:
 @dataclass
 class RenderResult:
     """نتيجة التصدير."""
-    success: bool
+    success: bool = False
     output_path: str = ""
     file_size_mb: float = 0.0
     duration: float = 0.0
@@ -276,7 +278,7 @@ def parse_remotion_progress(line: str) -> Optional[tuple[int, int]]:
 # Main Class
 # ═══════════════════════════════════════════════════════════════════
 class RemotionRenderer:
-    """محرك التصدير v2.0."""
+    """محرك التصدير v2.1."""
     
     def __init__(
         self,
@@ -327,7 +329,7 @@ class RemotionRenderer:
         self._check_dependencies()
         
         logger.info(
-            f"🎬 RemotionRenderer v2.0 | "
+            f"🎬 RemotionRenderer v2.1 | "
             f"{self.w}x{self.h}@{self.fps}fps"
         )
         logger.info(f"   📁 Remotion: {self.remotion_dir}")
@@ -422,6 +424,7 @@ class RemotionRenderer:
             return RenderResult(
                 success=False,
                 output_path=output_path,
+                quality=quality,
                 error=f"Validation: {e}",
                 elapsed_seconds=time.time() - start_time,
             )
@@ -430,18 +433,33 @@ class RemotionRenderer:
         if progress_callback:
             progress_callback(RenderProgress(stage="Preparing assets"))
         
+        assets_linked = 0
+        assets_copied = 0
+        
         try:
             assets_linked, assets_copied = self._prepare_assets(props)
         except Exception as e:
             return RenderResult(
                 success=False,
                 output_path=output_path,
+                quality=quality,
                 error=f"Asset preparation: {e}",
                 elapsed_seconds=time.time() - start_time,
             )
         
         # كتابة props
-        props_file = self._write_props(props)
+        try:
+            props_file = self._write_props(props)
+        except Exception as e:
+            return RenderResult(
+                success=False,
+                output_path=output_path,
+                quality=quality,
+                error=f"Failed to write props: {e}",
+                elapsed_seconds=time.time() - start_time,
+                assets_linked=assets_linked,
+                assets_copied=assets_copied,
+            )
         
         # Render مع retry
         render_success = False
@@ -475,27 +493,31 @@ class RemotionRenderer:
                 last_error = e
                 logger.error(f"❌ Render failed: {e}")
         
-        # بناء النتيجة
-        result = RenderResult(
-            output_path=output_path,
-            quality=quality,
-            assets_linked=assets_linked,
-            assets_copied=assets_copied,
-            retries=retries,
-        )
-        
+        # ✅ FIXED: بناء النتيجة مع success صريحاً
         if not render_success:
-            result.success = False
-            result.error = f"Render failed: {last_error}"
-            result.elapsed_seconds = time.time() - start_time
-            return result
+            return RenderResult(
+                success=False,
+                output_path=output_path,
+                quality=quality,
+                error=f"Render failed: {last_error}",
+                elapsed_seconds=time.time() - start_time,
+                assets_linked=assets_linked,
+                assets_copied=assets_copied,
+                retries=retries,
+            )
         
         # Validation للـ output
         if not Path(output_path).exists():
-            result.success = False
-            result.error = "Output file not created"
-            result.elapsed_seconds = time.time() - start_time
-            return result
+            return RenderResult(
+                success=False,
+                output_path=output_path,
+                quality=quality,
+                error="Output file not created",
+                elapsed_seconds=time.time() - start_time,
+                assets_linked=assets_linked,
+                assets_copied=assets_copied,
+                retries=retries,
+            )
         
         # إضافة metadata
         if metadata:
@@ -504,11 +526,17 @@ class RemotionRenderer:
             self._add_metadata(output_path, metadata)
         
         # معلومات الفيديو
+        file_size_mb = 0.0
+        duration = 0.0
+        width = 0
+        height = 0
+        frames_rendered = 0
+        
         try:
-            result.file_size_mb = Path(output_path).stat().st_size / (1024 * 1024)
-            result.duration = self.utils.get_duration(output_path)
-            result.width, result.height = self.utils.get_dimensions(output_path)
-            result.frames_rendered = int(result.duration * self.fps)
+            file_size_mb = Path(output_path).stat().st_size / (1024 * 1024)
+            duration = self.utils.get_duration(output_path)
+            width, height = self.utils.get_dimensions(output_path)
+            frames_rendered = int(duration * self.fps)
         except Exception as e:
             logger.warning(f"⚠ Failed to read output info: {e}")
         
@@ -524,11 +552,24 @@ class RemotionRenderer:
             except Exception:
                 pass
         
-        result.success = True
-        result.elapsed_seconds = time.time() - start_time
-        
         if progress_callback:
             progress_callback(RenderProgress(stage="Done!", percent=100))
+        
+        # ✅ FIXED: بناء النتيجة الناجحة مع success صريحاً
+        result = RenderResult(
+            success=True,
+            output_path=output_path,
+            file_size_mb=file_size_mb,
+            duration=duration,
+            width=width,
+            height=height,
+            quality=quality,
+            elapsed_seconds=time.time() - start_time,
+            frames_rendered=frames_rendered,
+            assets_linked=assets_linked,
+            assets_copied=assets_copied,
+            retries=retries,
+        )
         
         logger.info(result.summary())
         return result
@@ -741,6 +782,7 @@ class RemotionRenderer:
         logger.info("=" * 60)
         
         start_time = time.time()
+        process = None
         
         try:
             # استخدام Popen لقراءة output في real-time
@@ -810,7 +852,8 @@ class RemotionRenderer:
             )
             
         except subprocess.TimeoutExpired:
-            process.kill()
+            if process:
+                process.kill()
             raise RuntimeError(f"Render timeout ({timeout}s)")
     
     # ═══════════════════════════════════════════════════════════════
@@ -988,7 +1031,7 @@ if __name__ == "__main__":
     )
     
     print("=" * 60)
-    print("🎬 Remotion Renderer v2.0")
+    print("🎬 Remotion Renderer v2.1")
     print("=" * 60)
     
     try:
