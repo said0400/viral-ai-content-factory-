@@ -13,11 +13,10 @@
  * ═══════════════════════════════════════════════════════════════
  */
 
-import { useMemo, memo } from 'react';
+import React, { useMemo, memo } from 'react';
 import {
   AbsoluteFill,
   Sequence,
-  Series,
   useCurrentFrame,
   useVideoConfig,
   interpolate,
@@ -30,18 +29,20 @@ import { flip } from '@remotion/transitions/flip';
 import { clockWipe } from '@remotion/transitions/clock-wipe';
 import { iris } from '@remotion/transitions/iris';
 
-import { SceneRenderer } from '@components/SceneRenderer';
-import { ArabicSubtitle } from '@components/ArabicSubtitle';
-import { AudioTrack } from '@components/AudioTrack';
-import { Letterbox } from '@components/Letterbox';
-import { ColorGrade } from '@components/ColorGrade';
+// ✅ Relative imports (بدلاً من @components)
+import { SceneRenderer } from '../components/SceneRenderer';
+import { ArabicSubtitle } from '../components/ArabicSubtitle';
+import { AudioTrack } from '../components/AudioTrack';
+import { Letterbox } from '../components/Letterbox';
+import { ColorGrade } from '../components/ColorGrade';
 
+// ✅ Relative import للـ types
 import type {
   VideoProps,
   Scene,
   Subtitle,
   Transition,
-} from '@types/index';
+} from '../types';
 
 // ═══════════════════════════════════════════════════════════════
 // Helpers: Transition Mapping
