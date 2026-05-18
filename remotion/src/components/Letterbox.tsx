@@ -1,266 +1,495 @@
 /**
- * 🎞️ Letterbox Component
+ * 🎞️ Letterbox Component v2.0
  * ═══════════════════════════════════════════════════════════════
- * شرائط سوداء سينمائية في الأعلى والأسفل
- * 
- * يضيف لمسة سينمائية احترافية للفيديو:
- *   ✓ شرائط قابلة للتخصيص (سماكة، لون، شفافية)
- *   ✓ ظل خفيف للعمق
- *   ✓ أنيميشن دخول اختياري
- *   ✓ 4 أنماط جاهزة (cinematic, thin, thick, off)
+ * شرائط سوداء سينمائية:
+ *   ✓ Horizontal & Vertical letterbox
+ *   ✓ Slide-in / Fade-in animations
+ *   ✓ Slide-out في النهاية
+ *   ✓ Gradient support
+ *   ✓ Text overlay (LetterboxWithText)
+ *   ✓ خط فاصل احترافي
+ *   ✓ Performance optimized
  * ═══════════════════════════════════════════════════════════════
  */
 
-import React from "react";
+import { useMemo, memo, ReactNode } from 'react';
 import {
   AbsoluteFill,
   useCurrentFrame,
+  useVideoConfig,
   interpolate,
-} from "remotion";
-import { LetterboxProps } from "../types";
+} from 'remotion';
+import type { LetterboxConfig } from '@types/index';
 
-// ════════════════════════════════════════════════════════════════════
-// 🎞️ Letterbox Component
-// ════════════════════════════════════════════════════════════════════
-export const Letterbox: React.FC<LetterboxProps> = ({
-  config,
-  width,
-  height,
-}) => {
-  const frame = useCurrentFrame();
+// ═══════════════════════════════════════════════════════════════
+// Types
+// ═══════════════════════════════════════════════════════════════
+export type LetterboxOrientation = 'horizontal' | 'vertical' | 'both';
+export type LetterboxAnimation = 'slide' | 'fade' | 'none';
 
-  // ─── إذا كان معطّل، لا تعرض شيئاً ───────────────────────────────
-  if (!config.enabled) {
-    return null;
-  }
+export interface LetterboxProps {
+  config: LetterboxConfig;
+  width: number;
+  height: number;
+  
+  /** اتجاه الشرائط */
+  orientation?: LetterboxOrientation;
+  
+  /** نوع الأنيميشن */
+  animation?: LetterboxAnimation;
+  
+  /** مدة الـ slide-in (frames) */
+  slideInFrames?: number;
+  
+  /** تفعيل slide-out في النهاية */
+  slideOut?: boolean;
+  
+  /** مدة slide-out (frames) */
+  slideOutFrames?: number;
+  
+  /** إظهار الخط الفاصل */
+  showSeparatorLine?: boolean;
+  
+  /** لون الخط الفاصل */
+  separatorColor?: string;
+  
+  /** z-index */
+  zIndex?: number;
+}
 
-  // ─── حساب أبعاد الشرائط ─────────────────────────────────────────
-  const barRatio = config.barRatio || 0.055;
-  const barHeight = Math.floor(height * barRatio);
-  const barColor = config.color || "#000000";
-  const barOpacity = config.opacity || 0.92;
-
-  // ─── أنيميشن الدخول (slide in من الحواف) ────────────────────────
-  const slideInFrames = 15;
-  const slideProgress = interpolate(
-    frame,
-    [0, slideInFrames],
-    [0, 1],
-    { extrapolateRight: "clamp" }
-  );
-
-  // ـــ إزاحة الشرائط (تبدأ من خارج الشاشة)
-  const topBarOffset = interpolate(slideProgress, [0, 1], [-barHeight, 0]);
-  const bottomBarOffset = interpolate(
-    slideProgress,
-    [0, 1],
-    [barHeight, 0]
-  );
-
-  // ════════════════════════════════════════════════════════════════
-  // 🎨 الـ Render
-  // ════════════════════════════════════════════════════════════════
-  return (
-    <AbsoluteFill
-      style={{
-        pointerEvents: "none",
-        zIndex: 100,
-      }}
-    >
-      {/* ─────────────────────────────────────────────────────────── */}
-      {/* ⬛ الشريط العلوي                                            */}
-      {/* ─────────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: barHeight,
-          backgroundColor: barColor,
-          opacity: barOpacity,
-          transform: `translateY(${topBarOffset}px)`,
-          // ظل خفيف لإحساس العمق
-          boxShadow: "0 4px 20px rgba(0, 0, 0, 0.4)",
-        }}
-      />
-
-      {/* ─────────────────────────────────────────────────────────── */}
-      {/* ⬛ الشريط السفلي                                            */}
-      {/* ─────────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          width: "100%",
-          height: barHeight,
-          backgroundColor: barColor,
-          opacity: barOpacity,
-          transform: `translateY(${bottomBarOffset}px)`,
-          // ظل خفيف من الأعلى
-          boxShadow: "0 -4px 20px rgba(0, 0, 0, 0.4)",
-        }}
-      />
-
-      {/* ─────────────────────────────────────────────────────────── */}
-      {/* ✨ خط فاصل خفيف (اختياري - يضيف لمسة احترافية)              */}
-      {/* ─────────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          position: "absolute",
-          top: barHeight + topBarOffset,
-          left: 0,
-          width: "100%",
-          height: 1,
-          backgroundColor: "rgba(255, 255, 255, 0.05)",
-          opacity: slideProgress,
-        }}
-      />
-      <div
-        style={{
-          position: "absolute",
-          bottom: barHeight - bottomBarOffset,
-          left: 0,
-          width: "100%",
-          height: 1,
-          backgroundColor: "rgba(255, 255, 255, 0.05)",
-          opacity: slideProgress,
-        }}
-      />
-    </AbsoluteFill>
-  );
-};
-
-// ════════════════════════════════════════════════════════════════════
-// 🎬 Letterbox مع نص (للعنوان أو معلومات إضافية)
-// ════════════════════════════════════════════════════════════════════
-interface LetterboxWithTextProps extends LetterboxProps {
+export interface LetterboxWithTextProps extends LetterboxProps {
   topText?: string;
   bottomText?: string;
   textColor?: string;
   textSize?: number;
+  textFontFamily?: string;
+  textFontWeight?: number;
 }
 
-export const LetterboxWithText: React.FC<LetterboxWithTextProps> = ({
-  config,
-  width,
-  height,
-  topText,
-  bottomText,
-  textColor = "rgba(255, 255, 255, 0.7)",
-  textSize = 24,
-}) => {
-  if (!config.enabled) return null;
+export interface GradientLetterboxProps extends LetterboxProps {
+  topGradient?: string;
+  bottomGradient?: string;
+}
 
-  const barRatio = config.barRatio || 0.055;
-  const barHeight = Math.floor(height * barRatio);
+// ═══════════════════════════════════════════════════════════════
+// Constants
+// ═══════════════════════════════════════════════════════════════
+const DEFAULT_SLIDE_IN_FRAMES = 15;
+const DEFAULT_SLIDE_OUT_FRAMES = 15;
+const DEFAULT_BAR_RATIO = 0.055;
+const DEFAULT_BAR_COLOR = '#000000';
+const DEFAULT_BAR_OPACITY = 0.92;
+const DEFAULT_Z_INDEX = 100;
+const DEFAULT_SEPARATOR_COLOR = 'rgba(255, 255, 255, 0.05)';
 
-  return (
-    <>
-      {/* الشرائط الأساسية */}
-      <Letterbox config={config} width={width} height={height} />
+// ═══════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════
+const calculateAnimationProgress = (
+  frame: number,
+  totalFrames: number,
+  slideInFrames: number,
+  slideOutFrames: number,
+  slideOut: boolean,
+): number => {
+  // Slide in
+  const inProgress = interpolate(
+    frame,
+    [0, slideInFrames],
+    [0, 1],
+    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
+  );
+  
+  // Slide out (if enabled)
+  if (slideOut) {
+    const outStart = totalFrames - slideOutFrames;
+    const outProgress = interpolate(
+      frame,
+      [outStart, totalFrames],
+      [1, 0],
+      { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
+    );
+    return Math.min(inProgress, outProgress);
+  }
+  
+  return inProgress;
+};
 
-      {/* النص العلوي (إذا وُجد) */}
-      {topText && (
+// ═══════════════════════════════════════════════════════════════
+// 🎞️ Main Letterbox Component
+// ═══════════════════════════════════════════════════════════════
+export const Letterbox: React.FC<LetterboxProps> = memo(
+  ({
+    config,
+    width,
+    height,
+    orientation = 'horizontal',
+    animation = 'slide',
+    slideInFrames = DEFAULT_SLIDE_IN_FRAMES,
+    slideOut = false,
+    slideOutFrames = DEFAULT_SLIDE_OUT_FRAMES,
+    showSeparatorLine = true,
+    separatorColor = DEFAULT_SEPARATOR_COLOR,
+    zIndex = DEFAULT_Z_INDEX,
+  }) => {
+    const frame = useCurrentFrame();
+    const { durationInFrames } = useVideoConfig();
+    
+    // إذا معطّل
+    if (!config.enabled) {
+      return null;
+    }
+    
+    // ─── Calculate Dimensions ──────────────────────────────────
+    const barRatio = config.barRatio ?? DEFAULT_BAR_RATIO;
+    const barColor = config.color ?? DEFAULT_BAR_COLOR;
+    const barOpacity = config.opacity ?? DEFAULT_BAR_OPACITY;
+    
+    const horizontalBarHeight = Math.floor(height * barRatio);
+    const verticalBarWidth = Math.floor(width * barRatio);
+    
+    // ─── Animation Progress ────────────────────────────────────
+    const progress = useMemo(
+      () =>
+        animation === 'none'
+          ? 1
+          : calculateAnimationProgress(
+              frame,
+              durationInFrames,
+              slideInFrames,
+              slideOutFrames,
+              slideOut,
+            ),
+      [frame, durationInFrames, slideInFrames, slideOutFrames, slideOut, animation],
+    );
+    
+    // ─── Render Horizontal Bars ────────────────────────────────
+    const renderHorizontalBars = () => {
+      const topOffset =
+        animation === 'slide'
+          ? interpolate(progress, [0, 1], [-horizontalBarHeight, 0])
+          : 0;
+      
+      const bottomOffset =
+        animation === 'slide'
+          ? interpolate(progress, [0, 1], [horizontalBarHeight, 0])
+          : 0;
+      
+      const opacity = animation === 'fade' ? progress * barOpacity : barOpacity;
+      
+      return (
+        <>
+          {/* Top Bar */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: horizontalBarHeight,
+              backgroundColor: barColor,
+              opacity,
+              transform: `translateY(${topOffset}px)`,
+              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)',
+            }}
+          />
+          
+          {/* Bottom Bar */}
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              width: '100%',
+              height: horizontalBarHeight,
+              backgroundColor: barColor,
+              opacity,
+              transform: `translateY(${bottomOffset}px)`,
+              boxShadow: '0 -4px 20px rgba(0, 0, 0, 0.4)',
+            }}
+          />
+          
+          {/* Separator Lines */}
+          {showSeparatorLine && (
+            <>
+              <div
+                style={{
+                  position: 'absolute',
+                  top: horizontalBarHeight + topOffset,
+                  left: 0,
+                  width: '100%',
+                  height: 1,
+                  backgroundColor: separatorColor,
+                  opacity: progress,
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: horizontalBarHeight - bottomOffset,
+                  left: 0,
+                  width: '100%',
+                  height: 1,
+                  backgroundColor: separatorColor,
+                  opacity: progress,
+                }}
+              />
+            </>
+          )}
+        </>
+      );
+    };
+    
+    // ─── Render Vertical Bars ──────────────────────────────────
+    const renderVerticalBars = () => {
+      const leftOffset =
+        animation === 'slide'
+          ? interpolate(progress, [0, 1], [-verticalBarWidth, 0])
+          : 0;
+      
+      const rightOffset =
+        animation === 'slide'
+          ? interpolate(progress, [0, 1], [verticalBarWidth, 0])
+          : 0;
+      
+      const opacity = animation === 'fade' ? progress * barOpacity : barOpacity;
+      
+      return (
+        <>
+          {/* Left Bar */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: verticalBarWidth,
+              height: '100%',
+              backgroundColor: barColor,
+              opacity,
+              transform: `translateX(${leftOffset}px)`,
+              boxShadow: '4px 0 20px rgba(0, 0, 0, 0.4)',
+            }}
+          />
+          
+          {/* Right Bar */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              width: verticalBarWidth,
+              height: '100%',
+              backgroundColor: barColor,
+              opacity,
+              transform: `translateX(${rightOffset}px)`,
+              boxShadow: '-4px 0 20px rgba(0, 0, 0, 0.4)',
+            }}
+          />
+        </>
+      );
+    };
+    
+    return (
+      <AbsoluteFill
+        style={{
+          pointerEvents: 'none',
+          zIndex,
+        }}
+      >
+        {(orientation === 'horizontal' || orientation === 'both') &&
+          renderHorizontalBars()}
+        
+        {(orientation === 'vertical' || orientation === 'both') &&
+          renderVerticalBars()}
+      </AbsoluteFill>
+    );
+  },
+);
+
+Letterbox.displayName = 'Letterbox';
+
+// ═══════════════════════════════════════════════════════════════
+// 📝 Letterbox with Text
+// ═══════════════════════════════════════════════════════════════
+export const LetterboxWithText: React.FC<LetterboxWithTextProps> = memo(
+  ({
+    config,
+    width,
+    height,
+    topText,
+    bottomText,
+    textColor = 'rgba(255, 255, 255, 0.7)',
+    textSize = 24,
+    textFontFamily = "'Cairo', sans-serif",
+    textFontWeight = 600,
+    ...rest
+  }) => {
+    if (!config.enabled) return null;
+    
+    const barRatio = config.barRatio ?? DEFAULT_BAR_RATIO;
+    const barHeight = Math.floor(height * barRatio);
+    const zIndex = rest.zIndex ?? DEFAULT_Z_INDEX;
+    
+    const textStyle: React.CSSProperties = useMemo(
+      () => ({
+        position: 'absolute',
+        left: 0,
+        width: '100%',
+        height: barHeight,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: textColor,
+        fontSize: textSize,
+        fontFamily: textFontFamily,
+        fontWeight: textFontWeight,
+        direction: 'rtl',
+        zIndex: zIndex + 1,
+        pointerEvents: 'none',
+      }),
+      [barHeight, textColor, textSize, textFontFamily, textFontWeight, zIndex],
+    );
+    
+    return (
+      <>
+        <Letterbox config={config} width={width} height={height} {...rest} />
+        
+        {topText && (
+          <div style={{ ...textStyle, top: 0 }}>{topText}</div>
+        )}
+        
+        {bottomText && (
+          <div style={{ ...textStyle, bottom: 0 }}>{bottomText}</div>
+        )}
+      </>
+    );
+  },
+);
+
+LetterboxWithText.displayName = 'LetterboxWithText';
+
+// ═══════════════════════════════════════════════════════════════
+// 🌈 Gradient Letterbox
+// ═══════════════════════════════════════════════════════════════
+export const GradientLetterbox: React.FC<GradientLetterboxProps> = memo(
+  ({
+    config,
+    width,
+    height,
+    topGradient = 'linear-gradient(180deg, #000000 0%, transparent 100%)',
+    bottomGradient = 'linear-gradient(0deg, #000000 0%, transparent 100%)',
+    zIndex = DEFAULT_Z_INDEX,
+  }) => {
+    if (!config.enabled) return null;
+    
+    const barRatio = config.barRatio ?? DEFAULT_BAR_RATIO;
+    const barHeight = Math.floor(height * barRatio);
+    const opacity = config.opacity ?? DEFAULT_BAR_OPACITY;
+    
+    return (
+      <AbsoluteFill style={{ pointerEvents: 'none', zIndex }}>
+        {/* Top */}
         <div
           style={{
-            position: "absolute",
+            position: 'absolute',
             top: 0,
             left: 0,
-            width: "100%",
+            width: '100%',
             height: barHeight,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: textColor,
-            fontSize: textSize,
-            fontFamily: "'Cairo', sans-serif",
-            fontWeight: 600,
-            direction: "rtl",
-            zIndex: 101,
-            pointerEvents: "none",
+            background: topGradient,
+            opacity,
           }}
-        >
-          {topText}
-        </div>
-      )}
-
-      {/* النص السفلي (إذا وُجد) */}
-      {bottomText && (
+        />
+        
+        {/* Bottom (gradient معكوس بدل rotate) */}
         <div
           style={{
-            position: "absolute",
+            position: 'absolute',
             bottom: 0,
             left: 0,
-            width: "100%",
+            width: '100%',
             height: barHeight,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: textColor,
-            fontSize: textSize,
-            fontFamily: "'Cairo', sans-serif",
-            fontWeight: 600,
-            direction: "rtl",
-            zIndex: 101,
-            pointerEvents: "none",
+            background: bottomGradient,
+            opacity,
           }}
-        >
-          {bottomText}
-        </div>
-      )}
-    </>
-  );
+        />
+      </AbsoluteFill>
+    );
+  },
+);
+
+GradientLetterbox.displayName = 'GradientLetterbox';
+
+// ═══════════════════════════════════════════════════════════════
+// 🎬 Cinematic Letterbox Preset
+// ═══════════════════════════════════════════════════════════════
+export type LetterboxPresetName = 'cinematic' | 'thin' | 'thick' | 'imax' | 'widescreen';
+
+const LETTERBOX_PRESETS: Record<LetterboxPresetName, Partial<LetterboxConfig>> = {
+  cinematic: {
+    barRatio: 0.055,
+    color: '#000000',
+    opacity: 0.92,
+  },
+  thin: {
+    barRatio: 0.03,
+    color: '#000000',
+    opacity: 1.0,
+  },
+  thick: {
+    barRatio: 0.08,
+    color: '#000000',
+    opacity: 1.0,
+  },
+  imax: {
+    barRatio: 0.12,
+    color: '#000000',
+    opacity: 1.0,
+  },
+  widescreen: {
+    barRatio: 0.07,
+    color: '#000000',
+    opacity: 0.95,
+  },
 };
 
-// ════════════════════════════════════════════════════════════════════
-// 🎨 Letterbox بألوان متدرجة (للمشاهد الخاصة)
-// ════════════════════════════════════════════════════════════════════
-interface GradientLetterboxProps extends LetterboxProps {
-  gradient?: string;
+interface PresetLetterboxProps {
+  preset: LetterboxPresetName;
+  width: number;
+  height: number;
+  enabled?: boolean;
+  animation?: LetterboxAnimation;
 }
 
-export const GradientLetterbox: React.FC<GradientLetterboxProps> = ({
-  config,
-  width,
-  height,
-  gradient = "linear-gradient(180deg, #000000 0%, #1a1a2e 100%)",
-}) => {
-  if (!config.enabled) return null;
-
-  const barHeight = Math.floor(height * (config.barRatio || 0.055));
-
-  return (
-    <AbsoluteFill style={{ pointerEvents: "none", zIndex: 100 }}>
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: barHeight,
-          background: gradient,
-          opacity: config.opacity || 0.92,
-        }}
+export const PresetLetterbox: React.FC<PresetLetterboxProps> = memo(
+  ({ preset, width, height, enabled = true, animation = 'slide' }) => {
+    const presetConfig = LETTERBOX_PRESETS[preset];
+    
+    const config: LetterboxConfig = useMemo(
+      () => ({
+        name: preset,
+        enabled,
+        barRatio: presetConfig.barRatio ?? DEFAULT_BAR_RATIO,
+        color: presetConfig.color ?? DEFAULT_BAR_COLOR,
+        opacity: presetConfig.opacity ?? DEFAULT_BAR_OPACITY,
+      }),
+      [preset, enabled, presetConfig],
+    );
+    
+    return (
+      <Letterbox
+        config={config}
+        width={width}
+        height={height}
+        animation={animation}
       />
-      <div
-        style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          width: "100%",
-          height: barHeight,
-          background: gradient,
-          opacity: config.opacity || 0.92,
-          transform: "rotate(180deg)",
-        }}
-      />
-    </AbsoluteFill>
-  );
-};
+    );
+  },
+);
 
-// ════════════════════════════════════════════════════════════════════
-// 📦 Export
-// ════════════════════════════════════════════════════════════════════
+PresetLetterbox.displayName = 'PresetLetterbox';
+
+// ═══════════════════════════════════════════════════════════════
+// Export
+// ═══════════════════════════════════════════════════════════════
 export default Letterbox;
