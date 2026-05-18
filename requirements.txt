@@ -19,17 +19,17 @@
 # Groq (Primary - مجاني وسريع)
 groq>=0.11.0,<1.0.0
 
-# Gemini AI (Modern SDK - replaces google-generativeai)
+# Gemini AI - SDK الجديد (للـ TTS)
 google-genai>=0.3.0,<1.0.0
 
-# Legacy Gemini SDK (للتوافق الخلفي - اختياري)
-# google-generativeai>=0.7.0,<1.0.0
+# Gemini AI - SDK القديم (للـ Script Writer - مطلوب!)
+google-generativeai>=0.7.0,<1.0.0
 
 # ═══════════════════════════════════════════════════════════════════
 # 🎙️ Text-to-Speech (TTS)
 # ═══════════════════════════════════════════════════════════════════
 
-# Edge TTS (Primary - مجاني)
+# Edge TTS (مجاني - لكن لا يعمل في GitHub Actions)
 edge-tts>=6.1.10,<7.0.0
 
 # ElevenLabs (Premium - اختياري)
@@ -72,6 +72,9 @@ urllib3>=2.0.0,<3.0.0
 # Retry mechanism
 tenacity>=8.2.0,<9.0.0
 
+# Async HTTP (للـ TTS)
+aiohttp>=3.9.0,<4.0.0
+
 # ═══════════════════════════════════════════════════════════════════
 # 🛠️ Utilities
 # ═══════════════════════════════════════════════════════════════════
@@ -85,7 +88,7 @@ tqdm>=4.66.4,<5.0.0
 # Colored terminal output
 colorama>=0.4.6,<1.0.0
 
-# Pretty terminal output (اختياري لكن مفيد)
+# Pretty terminal output
 rich>=13.7.0,<14.0.0
 
 # ═══════════════════════════════════════════════════════════════════
@@ -96,10 +99,10 @@ rich>=13.7.0,<14.0.0
 pydantic>=2.5.0,<3.0.0
 
 # ═══════════════════════════════════════════════════════════════════
-# 🎬 Video Download (اختياري - للموسيقى من YouTube)
+# 🎬 Optional Tools
 # ═══════════════════════════════════════════════════════════════════
 
-# Uncomment if you want to download from YouTube
+# yt-dlp (لتحميل موسيقى من YouTube - اختياري)
 # yt-dlp>=2024.5.0
 
 # ═══════════════════════════════════════════════════════════════════
