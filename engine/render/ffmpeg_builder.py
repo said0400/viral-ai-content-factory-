@@ -1,481 +1,719 @@
 """
-🎞️ FFmpeg Builder — التصدير النهائي للفيديو
+🎞️ FFmpeg Builder v2.0 — Pro
 ═══════════════════════════════════════════════════════════════
-محرك التصدير النهائي يوفر:
-  ✓ MP4 متوافق مع YouTube/TikTok/Instagram (H.264 + AAC)
-  ✓ 3 مستويات جودة (medium/high/ultra)
-  ✓ Metadata كاملة (عربية + إنجليزية)
-  ✓ Thumbnails متعددة (1080x1920)
-  ✓ تحقق من حجم الملف
-  ✓ تنظيف ذكي للملفات المؤقتة
+محرك التصدير النهائي (مبسّط):
+  ✓ تصدير MP4 احترافي
+  ✓ Concat لعدة فيديوهات
+  ✓ Merge مع audio منفصل
+  ✓ Progress tracking
+  ✓ Result dataclass
+  ✓ يفوّض الباقي لـ VideoUtils
 
-ضع في: engine/render/ffmpeg_builder.py
+التحسينات v2.0:
+  ✓ يستخدم ffmpeg_utils
+  ✓ يفوّض لـ VideoUtils
+  ✓ RenderResult dataclass
+  ✓ Progress callback
+  ✓ Concat support
+  ✓ Audio merge
+  ✓ لا eval()
 ═══════════════════════════════════════════════════════════════
 """
 
+from __future__ import annotations
+
 import os
-import json
+import time
 import shutil
 import logging
 import subprocess
 from pathlib import Path
-from typing import Optional, Dict, List
+from enum import Enum
+from dataclasses import dataclass, field
+from typing import Optional, Callable
+
+from engine.video.voice.ffmpeg_utils import (
+    check_ffmpeg_available, run_ffmpeg, get_audio_duration,
+)
+from .video_utils import VideoUtils, VideoInfo
 
 logger = logging.getLogger(__name__)
 
 
-class FFmpegBuilder:
-    """محرك التصدير النهائي إلى MP4."""
+# ═══════════════════════════════════════════════════════════════════
+# Enums
+# ═══════════════════════════════════════════════════════════════════
+class RenderQuality(str, Enum):
+    """جودة التصدير."""
+    DRAFT = "draft"
+    MEDIUM = "medium"
+    HIGH = "high"
+    ULTRA = "ultra"
 
-    # ─── Presets الجودة (متطابق مع main.py) ──────────────────────
-    QUALITY_PRESETS = {
-        "medium": {
-            "crf":          "23",
-            "preset":       "fast",
-            "audio_bitrate": "128k",
-            "audio_rate":    "44100",
-            "video_bitrate": None,  # CRF mode
-        },
-        "high": {
-            "crf":          "19",
-            "preset":       "medium",
-            "audio_bitrate": "192k",
-            "audio_rate":    "44100",
-            "video_bitrate": None,
-        },
-        "ultra": {
-            "crf":          "17",
-            "preset":       "slow",
-            "audio_bitrate": "256k",
-            "audio_rate":    "48000",
-            "video_bitrate": None,
-        },
-    }
 
-    # ─── Legacy presets (للتوافق الرجعي) ─────────────────────────
-    LEGACY_PRESETS = {
-        "tiktok":  "high",
-        "reels":   "ultra",
-        "shorts":  "high",
-        "preview": "medium",
-    }
+# ═══════════════════════════════════════════════════════════════════
+# Dataclasses
+# ═══════════════════════════════════════════════════════════════════
+@dataclass
+class QualityPreset:
+    """preset جودة."""
+    name: str
+    crf: int = 19
+    preset: str = "medium"  # ultrafast → veryslow
+    audio_bitrate: str = "192k"
+    audio_rate: int = 44100
+    video_bitrate: Optional[str] = None  # None = CRF mode
+    profile: str = "high"
+    level: str = "4.1"
+    
+    def to_args(self) -> list[str]:
+        """تحويل لـ FFmpeg args."""
+        args = [
+            "-c:v", "libx264",
+            "-crf", str(self.crf),
+            "-preset", self.preset,
+            "-profile:v", self.profile,
+            "-level:v", self.level,
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", self.audio_bitrate,
+            "-ar", str(self.audio_rate),
+            "-ac", "2",
+        ]
+        
+        if self.video_bitrate:
+            args.extend(["-b:v", self.video_bitrate])
+        
+        return args
 
-    # ─── حدود المنصات (MB) ────────────────────────────────────────
-    PLATFORM_LIMITS = {
-        "youtube_shorts": 256,
-        "tiktok":         287,
-        "instagram":      650,
-        "twitter":        512,
-    }
 
+@dataclass
+class RenderResult:
+    """نتيجة التصدير."""
+    success: bool
+    output_path: str = ""
+    file_size_mb: float = 0.0
+    duration: float = 0.0
+    width: int = 0
+    height: int = 0
+    quality: str = ""
+    elapsed_seconds: float = 0.0
+    error: Optional[str] = None
+    info: Optional[VideoInfo] = None
+    
+    def summary(self) -> str:
+        return (
+            f"📊 Render Result:\n"
+            f"   • Status: {'✅' if self.success else '❌'}\n"
+            f"   • Output: {Path(self.output_path).name if self.output_path else 'N/A'}\n"
+            f"   • Size: {self.file_size_mb:.1f} MB\n"
+            f"   • Duration: {self.duration:.1f}s\n"
+            f"   • Resolution: {self.width}x{self.height}\n"
+            f"   • Quality: {self.quality}\n"
+            f"   • Time: {self.elapsed_seconds:.1f}s"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Presets
+# ═══════════════════════════════════════════════════════════════════
+QUALITY_PRESETS: dict[str, QualityPreset] = {
+    "draft": QualityPreset(
+        name="draft", crf=28, preset="ultrafast",
+        audio_bitrate="96k", audio_rate=44100,
+    ),
+    "medium": QualityPreset(
+        name="medium", crf=23, preset="fast",
+        audio_bitrate="128k", audio_rate=44100,
+    ),
+    "high": QualityPreset(
+        name="high", crf=19, preset="medium",
+        audio_bitrate="192k", audio_rate=44100,
+    ),
+    "ultra": QualityPreset(
+        name="ultra", crf=17, preset="slow",
+        audio_bitrate="256k", audio_rate=48000,
+    ),
+}
+
+# Legacy presets
+LEGACY_PRESETS: dict[str, str] = {
+    "tiktok": "high",
+    "reels": "ultra",
+    "shorts": "high",
+    "preview": "medium",
+}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Constants
+# ═══════════════════════════════════════════════════════════════════
+class BuilderConstants:
+    """ثوابت."""
+    
     DEFAULT_TIMEOUT = 600  # 10 دقائق
+    MAX_METADATA_LENGTH = 200
+    
+    # Streaming optimization
+    STREAMING_FLAGS = ["-movflags", "+faststart"]
 
-    # ════════════════════════════════════════════════════════════════
-    def __init__(self):
-        """تهيئة محرك التصدير."""
-        self.w = int(os.getenv("VIDEO_WIDTH",  "1080"))
-        self.h = int(os.getenv("VIDEO_HEIGHT", "1920"))
-        self.fps = int(os.getenv("VIDEO_FPS",  "30"))
 
-        self.temp_dir = Path(os.getenv("TEMP_DIR",   "./temp"))
+# ═══════════════════════════════════════════════════════════════════
+# Main Class
+# ═══════════════════════════════════════════════════════════════════
+class FFmpegBuilder:
+    """محرك التصدير v2.0."""
+    
+    def __init__(
+        self,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        fps: Optional[int] = None,
+    ):
+        """
+        Args:
+            width, height, fps: أبعاد افتراضية
+        """
+        # Settings
+        self.w = width or int(os.getenv("VIDEO_WIDTH", "1080"))
+        self.h = height or int(os.getenv("VIDEO_HEIGHT", "1920"))
+        self.fps = fps or int(os.getenv("VIDEO_FPS", "30"))
+        
+        # Directories
+        self.temp_dir = Path(os.getenv("TEMP_DIR", "./temp"))
         self.out_dir = Path(os.getenv("OUTPUT_DIR", "./output"))
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.out_dir.mkdir(parents=True, exist_ok=True)
-
-        # فحص FFmpeg
-        self._check_ffmpeg()
-
-        logger.info(
-            f"🎞️ FFmpegBuilder | {self.w}x{self.h}@{self.fps}fps"
-        )
-
-    def _check_ffmpeg(self) -> None:
-        """التحقق من تثبيت FFmpeg."""
-        try:
-            result = subprocess.run(
-                ["ffmpeg", "-version"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=True,
-            )
-            version_line = result.stdout.splitlines()[0]
-            logger.info(f"✓ {version_line}")
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        
+        # FFmpeg check
+        if not check_ffmpeg_available():
             raise RuntimeError(
                 "❌ FFmpeg غير مثبت!\n"
-                "   Ubuntu/Debian: sudo apt install ffmpeg\n"
-                "   macOS:         brew install ffmpeg\n"
-                "   Windows:       https://ffmpeg.org/download.html"
+                "   Ubuntu: sudo apt install ffmpeg\n"
+                "   macOS:  brew install ffmpeg"
             )
-
-    # ════════════════════════════════════════════════════════════════
-    #                    التصدير الرئيسي
-    # ════════════════════════════════════════════════════════════════
+        
+        # Utils (للـ thumbnails, info, validation)
+        self.utils = VideoUtils(
+            width=self.w,
+            height=self.h,
+            fps=self.fps,
+        )
+        
+        logger.info(
+            f"🎞️ FFmpegBuilder v2.0 | {self.w}x{self.h}@{self.fps}fps"
+        )
+    
+    # ═══════════════════════════════════════════════════════════════
+    # Main Render
+    # ═══════════════════════════════════════════════════════════════
+    def render(
+        self,
+        input_video: str,
+        output_path: str,
+        quality: str = "high",
+        metadata: Optional[dict] = None,
+        input_audio: Optional[str] = None,
+        timeout: int = BuilderConstants.DEFAULT_TIMEOUT,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> RenderResult:
+        """
+        🎯 التصدير النهائي.
+        
+        Args:
+            input_video: الفيديو المُدخل
+            output_path: مسار الإخراج
+            quality: draft / medium / high / ultra
+            metadata: metadata للفيديو
+            input_audio: صوت منفصل (اختياري)
+            timeout: timeout بالثواني
+            progress_callback: callback للحالة
+        """
+        start_time = time.time()
+        
+        # Validation
+        if not Path(input_video).exists():
+            return RenderResult(
+                success=False,
+                error=f"Video not found: {input_video}",
+            )
+        
+        if input_audio and not Path(input_audio).exists():
+            return RenderResult(
+                success=False,
+                error=f"Audio not found: {input_audio}",
+            )
+        
+        # Quality preset
+        preset = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["high"])
+        
+        # Output directory
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"🚀 Rendering [{quality}]...")
+        if progress_callback:
+            progress_callback(f"Starting [{quality}]")
+        
+        # Build command
+        cmd_args = self._build_render_args(
+            input_video=input_video,
+            input_audio=input_audio,
+            preset=preset,
+            metadata=metadata,
+        )
+        
+        # Execute
+        if progress_callback:
+            progress_callback("Encoding...")
+        
+        result = run_ffmpeg(
+            args=cmd_args,
+            output_path=output_path,
+            description=f"Render {quality}",
+            audio_config=False,  # نضع config يدوياً
+            timeout=timeout,
+        )
+        
+        elapsed = time.time() - start_time
+        
+        if not result.success:
+            return RenderResult(
+                success=False,
+                output_path=output_path,
+                quality=quality,
+                error=result.error,
+                elapsed_seconds=elapsed,
+            )
+        
+        # جلب معلومات الـ output
+        if progress_callback:
+            progress_callback("Validating output...")
+        
+        info = self.utils.get_video_info(output_path)
+        
+        render_result = RenderResult(
+            success=True,
+            output_path=output_path,
+            quality=quality,
+            elapsed_seconds=elapsed,
+            info=info,
+        )
+        
+        if info:
+            render_result.file_size_mb = info.size_mb
+            render_result.duration = info.duration
+            render_result.width = info.width
+            render_result.height = info.height
+        
+        # تحذيرات platform
+        self._check_platform_warnings(render_result)
+        
+        logger.info(render_result.summary())
+        
+        if progress_callback:
+            progress_callback("Done!")
+        
+        return render_result
+    
+    # ═══════════════════════════════════════════════════════════════
+    # Backward Compatibility
+    # ═══════════════════════════════════════════════════════════════
     def render_final(
         self,
         input_video: str,
         output_path: str,
         quality: str = "high",
-        metadata: Optional[Dict] = None,
-        preset: Optional[str] = None,  # legacy support
+        metadata: Optional[dict] = None,
+        preset: Optional[str] = None,
     ) -> str:
-        """
-        التصدير النهائي للفيديو.
-
-        Args:
-            input_video: مسار الفيديو المُدخل
-            output_path: مسار الفيديو الناتج
-            quality: medium / high / ultra
-            metadata: بيانات وصفية (title, description, etc.)
-            preset: legacy parameter (tiktok/reels/preview)
-
-        Returns:
-            مسار الفيديو النهائي
-        """
-        # دعم Legacy
+        """متوافق مع v1."""
+        # Legacy preset
         if preset and quality == "high":
-            quality = self.LEGACY_PRESETS.get(preset, "high")
-
-        # الحصول على إعدادات الجودة
-        cfg = self.QUALITY_PRESETS.get(quality, self.QUALITY_PRESETS["high"])
-        metadata = metadata or {}
-
-        # التحقق من المدخلات
-        if not Path(input_video).exists():
-            raise FileNotFoundError(f"❌ الفيديو المُدخل غير موجود: {input_video}")
-
-        # التأكد من وجود مجلد الإخراج
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-
-        logger.info(f"🚀 التصدير النهائي [{quality}]...")
-
-        # بناء الأمر
-        cmd = self._build_render_command(input_video, output_path, cfg, metadata)
-
-        # التنفيذ
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                timeout=self.DEFAULT_TIMEOUT,
+            quality = LEGACY_PRESETS.get(preset, "high")
+        
+        result = self.render(
+            input_video=input_video,
+            output_path=output_path,
+            quality=quality,
+            metadata=metadata,
+        )
+        
+        if not result.success:
+            raise RuntimeError(result.error)
+        
+        return result.output_path
+    
+    # ═══════════════════════════════════════════════════════════════
+    # Concat Videos
+    # ═══════════════════════════════════════════════════════════════
+    def concat_videos(
+        self,
+        video_paths: list[str],
+        output_path: str,
+        quality: str = "high",
+        method: str = "demuxer",  # demuxer or filter
+    ) -> RenderResult:
+        """
+        🆕 دمج عدة فيديوهات.
+        
+        Args:
+            video_paths: قائمة الفيديوهات
+            output_path: مسار الإخراج
+            quality: الجودة
+            method: demuxer (سريع) أو filter (للترميز)
+        """
+        start_time = time.time()
+        
+        # Validation
+        valid_videos = [v for v in video_paths if Path(v).exists()]
+        if not valid_videos:
+            return RenderResult(
+                success=False,
+                error="No valid videos",
             )
-
-            if result.returncode != 0:
-                err = result.stderr.decode("utf-8", errors="ignore")[:500]
-                raise RuntimeError(f"❌ فشل التصدير: {err}")
-
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(f"❌ التصدير تجاوز الوقت ({self.DEFAULT_TIMEOUT}s)")
-
-        # التحقق من الناتج
-        if not Path(output_path).exists():
-            raise RuntimeError("❌ ملف الإخراج لم يُنشأ")
-
-        # عرض المعلومات
-        self._print_output_info(output_path)
-
-        return output_path
-
-    def _build_render_command(
+        
+        if len(valid_videos) == 1:
+            # نسخ مباشر
+            shutil.copy(valid_videos[0], output_path)
+            info = self.utils.get_video_info(output_path)
+            return RenderResult(
+                success=True,
+                output_path=output_path,
+                quality=quality,
+                info=info,
+                file_size_mb=info.size_mb if info else 0,
+                duration=info.duration if info else 0,
+                width=info.width if info else 0,
+                height=info.height if info else 0,
+                elapsed_seconds=time.time() - start_time,
+            )
+        
+        logger.info(f"🔗 Concatenating {len(valid_videos)} videos...")
+        
+        if method == "demuxer":
+            return self._concat_demuxer(valid_videos, output_path, quality, start_time)
+        else:
+            return self._concat_filter(valid_videos, output_path, quality, start_time)
+    
+    def _concat_demuxer(
+        self,
+        videos: list[str],
+        output_path: str,
+        quality: str,
+        start_time: float,
+    ) -> RenderResult:
+        """دمج بـ concat demuxer (سريع، يحتاج نفس الـ codec)."""
+        # إنشاء list file
+        list_file = self.temp_dir / f"concat_{int(time.time())}.txt"
+        try:
+            with open(list_file, "w", encoding="utf-8") as f:
+                for v in videos:
+                    abs_path = Path(v).resolve()
+                    f.write(f"file '{abs_path}'\n")
+            
+            preset = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["high"])
+            
+            args = [
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(list_file),
+                "-c", "copy",  # نسخ بدون re-encode (أسرع)
+            ]
+            
+            result = run_ffmpeg(
+                args=args,
+                output_path=output_path,
+                description="Concat (demuxer)",
+                audio_config=False,
+            )
+            
+            if not result.success:
+                # Fallback: filter method
+                logger.warning("⚠ Demuxer failed, trying filter...")
+                return self._concat_filter(videos, output_path, quality, start_time)
+            
+            info = self.utils.get_video_info(output_path)
+            return RenderResult(
+                success=True,
+                output_path=output_path,
+                quality=quality,
+                info=info,
+                file_size_mb=info.size_mb if info else 0,
+                duration=info.duration if info else 0,
+                width=info.width if info else 0,
+                height=info.height if info else 0,
+                elapsed_seconds=time.time() - start_time,
+            )
+            
+        finally:
+            list_file.unlink(missing_ok=True)
+    
+    def _concat_filter(
+        self,
+        videos: list[str],
+        output_path: str,
+        quality: str,
+        start_time: float,
+    ) -> RenderResult:
+        """دمج بـ concat filter (re-encode، يعمل دائماً)."""
+        # بناء filter
+        inputs = []
+        for v in videos:
+            inputs.extend(["-i", v])
+        
+        n = len(videos)
+        filter_str = "".join(
+            f"[{i}:v][{i}:a]"
+            for i in range(n)
+        ) + f"concat=n={n}:v=1:a=1[outv][outa]"
+        
+        preset = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["high"])
+        
+        args = inputs + [
+            "-filter_complex", filter_str,
+            "-map", "[outv]",
+            "-map", "[outa]",
+            *preset.to_args(),
+        ]
+        
+        result = run_ffmpeg(
+            args=args,
+            output_path=output_path,
+            description="Concat (filter)",
+            audio_config=False,
+        )
+        
+        if not result.success:
+            return RenderResult(
+                success=False,
+                output_path=output_path,
+                error=result.error,
+                elapsed_seconds=time.time() - start_time,
+            )
+        
+        info = self.utils.get_video_info(output_path)
+        return RenderResult(
+            success=True,
+            output_path=output_path,
+            quality=quality,
+            info=info,
+            file_size_mb=info.size_mb if info else 0,
+            duration=info.duration if info else 0,
+            width=info.width if info else 0,
+            height=info.height if info else 0,
+            elapsed_seconds=time.time() - start_time,
+        )
+    
+    # ═══════════════════════════════════════════════════════════════
+    # Merge Audio
+    # ═══════════════════════════════════════════════════════════════
+    def merge_video_audio(
+        self,
+        video_path: str,
+        audio_path: str,
+        output_path: str,
+        replace_audio: bool = True,
+    ) -> RenderResult:
+        """
+        🆕 دمج صوت مع فيديو.
+        
+        Args:
+            video_path: الفيديو
+            audio_path: الصوت
+            output_path: الإخراج
+            replace_audio: استبدال الصوت الأصلي (True) أو mix (False)
+        """
+        start_time = time.time()
+        
+        if not Path(video_path).exists() or not Path(audio_path).exists():
+            return RenderResult(
+                success=False,
+                error="Input files not found",
+            )
+        
+        logger.info(f"🔊 Merging audio with video...")
+        
+        if replace_audio:
+            args = [
+                "-i", video_path,
+                "-i", audio_path,
+                "-c:v", "copy",  # نسخ video بدون re-encode
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-shortest",
+            ]
+        else:
+            # mix الـ audios
+            args = [
+                "-i", video_path,
+                "-i", audio_path,
+                "-filter_complex",
+                "[0:a][1:a]amix=inputs=2:duration=longest[aout]",
+                "-map", "0:v",
+                "-map", "[aout]",
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-b:a", "192k",
+            ]
+        
+        result = run_ffmpeg(
+            args=args,
+            output_path=output_path,
+            description="Merge audio",
+            audio_config=False,
+        )
+        
+        elapsed = time.time() - start_time
+        
+        if not result.success:
+            return RenderResult(
+                success=False,
+                output_path=output_path,
+                error=result.error,
+                elapsed_seconds=elapsed,
+            )
+        
+        info = self.utils.get_video_info(output_path)
+        return RenderResult(
+            success=True,
+            output_path=output_path,
+            info=info,
+            file_size_mb=info.size_mb if info else 0,
+            duration=info.duration if info else 0,
+            width=info.width if info else 0,
+            height=info.height if info else 0,
+            elapsed_seconds=elapsed,
+        )
+    
+    # ═══════════════════════════════════════════════════════════════
+    # Command Building
+    # ═══════════════════════════════════════════════════════════════
+    def _build_render_args(
         self,
         input_video: str,
-        output_path: str,
-        cfg: dict,
-        metadata: Dict,
-    ) -> List[str]:
-        """بناء أمر FFmpeg للتصدير."""
-        cmd = [
-            "ffmpeg", "-y", "-loglevel", "error",
-            "-i", input_video,
-
-            # Video codec
-            "-c:v", "libx264",
-            "-crf", cfg["crf"],
-            "-preset", cfg["preset"],
-            "-profile:v", "high",
-            "-level:v", "4.1",
-            "-pix_fmt", "yuv420p",
-            "-r", str(self.fps),
-
-            # Audio codec
-            "-c:a", "aac",
-            "-b:a", cfg["audio_bitrate"],
-            "-ar", cfg["audio_rate"],
-            "-ac", "2",
-
-            # Streaming optimization
-            "-movflags", "+faststart",
-        ]
-
-        # إضافة Metadata
+        preset: QualityPreset,
+        input_audio: Optional[str] = None,
+        metadata: Optional[dict] = None,
+    ) -> list[str]:
+        """بناء FFmpeg args."""
+        args = ["-i", input_video]
+        
+        # Audio منفصل
+        if input_audio:
+            args.extend(["-i", input_audio, "-map", "0:v", "-map", "1:a"])
+        
+        # FPS + Quality
+        args.extend(["-r", str(self.fps)])
+        args.extend(preset.to_args())
+        
+        # Streaming optimization
+        args.extend(BuilderConstants.STREAMING_FLAGS)
+        
+        # Metadata
         if metadata:
-            cmd.extend(self._build_metadata_args(metadata))
-
-        cmd.append(output_path)
-        return cmd
-
-    def _build_metadata_args(self, metadata: Dict) -> List[str]:
-        """بناء معاملات Metadata."""
+            args.extend(self._build_metadata_args(metadata))
+        
+        return args
+    
+    @staticmethod
+    def _build_metadata_args(metadata: dict) -> list[str]:
+        """بناء metadata args."""
         args = []
-
-        # الحقول المدعومة
+        
         field_map = {
-            "title":       "title",
+            "title": "title",
             "description": "comment",
-            "comment":     "comment",
-            "author":      "author",
-            "artist":      "artist",
-            "album":       "album",
-            "year":        "date",
-            "genre":       "genre",
+            "comment": "comment",
+            "author": "author",
+            "artist": "artist",
+            "album": "album",
+            "year": "date",
+            "genre": "genre",
         }
-
+        
         for key, ffmpeg_key in field_map.items():
             value = metadata.get(key)
             if value:
-                # تنظيف القيمة
-                value = str(value).replace('"', "'")[:200]
+                value = str(value).replace('"', "'")[:BuilderConstants.MAX_METADATA_LENGTH]
                 args.extend(["-metadata", f"{ffmpeg_key}={value}"])
-
+        
         return args
-
-    def _print_output_info(self, path: str) -> None:
-        """عرض معلومات الفيديو الناتج."""
-        try:
-            size_mb = Path(path).stat().st_size / (1024 * 1024)
-            duration = self.get_duration(path)
-            w, h = self.get_dimensions(path)
-
-            logger.info(f"✓ {Path(path).name}")
-            logger.info(
-                f"  📦 {size_mb:.1f} MB | "
-                f"⏱ {duration:.1f}s | "
-                f"📐 {w}x{h} | "
-                f"🎞 {self.fps}fps"
+    
+    # ═══════════════════════════════════════════════════════════════
+    # Platform Warnings
+    # ═══════════════════════════════════════════════════════════════
+    def _check_platform_warnings(self, result: RenderResult) -> None:
+        """تحذيرات platform."""
+        # سيستخدم validate_for_platform من VideoUtils
+        for platform in ["youtube_shorts", "tiktok", "instagram_reel"]:
+            validation = self.utils.validate_for_platform(
+                result.output_path,
+                platform,
             )
-
-            # تحذير إذا تجاوز حدود المنصات
-            self._check_platform_limits(size_mb)
-
-        except Exception as e:
-            logger.warning(f"⚠ فشل قراءة معلومات الملف: {e}")
-
-    def _check_platform_limits(self, size_mb: float) -> None:
-        """تحذير إذا تجاوز الفيديو حدود المنصات."""
-        for platform, limit in self.PLATFORM_LIMITS.items():
-            if size_mb > limit:
-                logger.warning(
-                    f"⚠ الحجم ({size_mb:.1f} MB) يتجاوز حد {platform} ({limit} MB)"
-                )
-
-    # ════════════════════════════════════════════════════════════════
-    #                    Thumbnails
-    # ════════════════════════════════════════════════════════════════
-    def create_thumbnail(
-        self,
-        video: str,
-        output: str,
-        timestamp: float = 1.5,
-        resize: bool = True,
-    ) -> str:
-        """
-        إنشاء thumbnail من الفيديو.
-
-        Args:
-            video: مسار الفيديو
-            output: مسار الـ thumbnail
-            timestamp: الوقت بالثواني لأخذ اللقطة
-            resize: تحجيم للأبعاد المطلوبة
-        """
-        if not Path(video).exists():
-            raise FileNotFoundError(f"❌ الفيديو غير موجود: {video}")
-
-        cmd = [
-            "ffmpeg", "-y", "-loglevel", "error",
-            "-ss", str(timestamp),
-            "-i", video,
-            "-vframes", "1",
-            "-q:v", "2",
-        ]
-
-        if resize:
-            cmd += ["-vf", f"scale={self.w}:{self.h}:force_original_aspect_ratio=decrease,"
-                          f"pad={self.w}:{self.h}:(ow-iw)/2:(oh-ih)/2"]
-
-        cmd.append(output)
-
-        try:
-            subprocess.run(
-                cmd,
-                check=True,
-                capture_output=True,
-                timeout=60,
-            )
-            logger.info(f"✓ Thumbnail: {Path(output).name}")
-            return output
-        except subprocess.CalledProcessError as e:
-            err = e.stderr.decode("utf-8", errors="ignore")[:200]
-            raise RuntimeError(f"❌ فشل إنشاء thumbnail: {err}")
-
-    def create_multiple_thumbnails(
-        self,
-        video: str,
-        output_dir: str,
-        count: int = 3,
-    ) -> List[str]:
-        """إنشاء عدة thumbnails من نقاط مختلفة في الفيديو."""
-        try:
-            duration = self.get_duration(video)
-        except Exception:
-            duration = 30.0
-
-        # نقاط متفرقة (تجنب البداية والنهاية)
-        timestamps = [
-            duration * (i + 1) / (count + 1)
-            for i in range(count)
-        ]
-
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        thumbnails = []
-
-        video_name = Path(video).stem
-        for i, ts in enumerate(timestamps):
-            output = str(Path(output_dir) / f"{video_name}_thumb_{i+1}.jpg")
-            try:
-                self.create_thumbnail(video, output, ts, resize=True)
-                thumbnails.append(output)
-            except Exception as e:
-                logger.warning(f"⚠ فشل thumbnail {i+1}: {e}")
-
-        return thumbnails
-
-    # ════════════════════════════════════════════════════════════════
-    #                    معلومات الفيديو
-    # ════════════════════════════════════════════════════════════════
-    def get_duration(self, path: str) -> float:
-        """الحصول على مدة الفيديو بالثواني."""
-        try:
-            result = subprocess.run(
-                [
-                    "ffprobe", "-v", "quiet",
-                    "-show_entries", "format=duration",
-                    "-of", "default=noprint_wrappers=1:nokey=1",
-                    path,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=True,
-            )
-            return float(result.stdout.strip())
-        except Exception as e:
-            logger.warning(f"⚠ فشل قراءة المدة: {e}")
-            return 0.0
-
-    def get_dimensions(self, path: str) -> tuple:
-        """الحصول على أبعاد الفيديو."""
-        try:
-            result = subprocess.run(
-                [
-                    "ffprobe", "-v", "quiet",
-                    "-print_format", "json",
-                    "-show_streams",
-                    path,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=True,
-            )
-            data = json.loads(result.stdout)
-            for stream in data.get("streams", []):
-                if stream.get("codec_type") == "video":
-                    return int(stream["width"]), int(stream["height"])
-        except Exception as e:
-            logger.warning(f"⚠ فشل قراءة الأبعاد: {e}")
-        return self.w, self.h
-
-    def get_video_info(self, path: str) -> dict:
-        """الحصول على معلومات شاملة عن الفيديو."""
-        try:
-            result = subprocess.run(
-                [
-                    "ffprobe", "-v", "quiet",
-                    "-print_format", "json",
-                    "-show_format",
-                    "-show_streams",
-                    path,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=True,
-            )
-            data = json.loads(result.stdout)
-
-            video_stream = next(
-                (s for s in data.get("streams", []) if s["codec_type"] == "video"),
-                {},
-            )
-            audio_stream = next(
-                (s for s in data.get("streams", []) if s["codec_type"] == "audio"),
-                {},
-            )
-
-            return {
-                "duration":      float(data.get("format", {}).get("duration", 0)),
-                "size_mb":       Path(path).stat().st_size / (1024 * 1024),
-                "bitrate":       int(data.get("format", {}).get("bit_rate", 0)) // 1000,
-                "width":         video_stream.get("width", 0),
-                "height":        video_stream.get("height", 0),
-                "video_codec":   video_stream.get("codec_name", "unknown"),
-                "audio_codec":   audio_stream.get("codec_name", "unknown"),
-                "fps":           eval(video_stream.get("avg_frame_rate", "0/1")),
-                "audio_channels": audio_stream.get("channels", 0),
-                "audio_rate":    audio_stream.get("sample_rate", 0),
-            }
-        except Exception as e:
-            logger.error(f"❌ فشل قراءة معلومات الفيديو: {e}")
-            return {}
-
-    # ════════════════════════════════════════════════════════════════
-    #                    التنظيف
-    # ════════════════════════════════════════════════════════════════
-    def cleanup_temp(self, keep_subdirs: bool = False) -> None:
-        """
-        تنظيف الملفات المؤقتة.
-
-        Args:
-            keep_subdirs: الإبقاء على المجلدات الفرعية
-        """
+            
+            if validation.errors:
+                logger.warning(f"⚠ {platform}: {validation.errors[0]}")
+    
+    # ═══════════════════════════════════════════════════════════════
+    # Delegated to VideoUtils
+    # ═══════════════════════════════════════════════════════════════
+    def create_thumbnail(self, video, output, timestamp=1.5, resize=True):
+        """يفوّض لـ VideoUtils."""
+        result = self.utils.create_thumbnail(video, output, timestamp, resize)
+        return result.path if result.success else ""
+    
+    def create_multiple_thumbnails(self, video, output_dir, count=3):
+        """يفوّض لـ VideoUtils."""
+        results = self.utils.create_multiple_thumbnails(video, output_dir, count)
+        return [r.path for r in results if r.success]
+    
+    def get_duration(self, path):
+        """يفوّض لـ VideoUtils."""
+        return self.utils.get_duration(path)
+    
+    def get_dimensions(self, path):
+        """يفوّض لـ VideoUtils."""
+        return self.utils.get_dimensions(path)
+    
+    def get_video_info(self, path):
+        """يفوّض لـ VideoUtils."""
+        info = self.utils.get_video_info(path)
+        return info.to_dict() if info else {}
+    
+    def validate_for_platform(self, video_path, platform="youtube_shorts"):
+        """يفوّض لـ VideoUtils."""
+        result = self.utils.validate_for_platform(video_path, platform)
+        return result.to_dict()
+    
+    # ═══════════════════════════════════════════════════════════════
+    # Cleanup
+    # ═══════════════════════════════════════════════════════════════
+    def cleanup_temp(self, keep_subdirs: bool = False) -> int:
+        """تنظيف temp."""
+        count = 0
         try:
             if not self.temp_dir.exists():
-                return
-
-            count = 0
+                return 0
+            
             if keep_subdirs:
-                # احذف الملفات فقط (ليس المجلدات)
                 for f in self.temp_dir.rglob("*"):
                     if f.is_file():
                         f.unlink(missing_ok=True)
                         count += 1
             else:
-                # احذف كل شيء
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
                 self.temp_dir.mkdir(parents=True, exist_ok=True)
-                count = -1  # غير معروف
-
-            if count > 0:
-                logger.info(f"🧹 تم تنظيف {count} ملف مؤقت")
-            else:
-                logger.info("🧹 تم تنظيف الملفات المؤقتة")
-
+            
+            logger.info(f"🧹 Cleaned {count} files")
         except Exception as e:
-            logger.warning(f"⚠ فشل التنظيف: {e}")
-
-    def cleanup_specific(self, patterns: List[str]) -> int:
-        """حذف ملفات محددة بناءً على patterns."""
+            logger.warning(f"⚠ Cleanup failed: {e}")
+        
+        return count
+    
+    def cleanup_specific(self, patterns: list[str]) -> int:
+        """تنظيف patterns."""
         count = 0
         try:
             for pattern in patterns:
@@ -483,73 +721,79 @@ class FFmpegBuilder:
                     if f.is_file():
                         f.unlink(missing_ok=True)
                         count += 1
-            if count:
-                logger.info(f"🧹 تم حذف {count} ملف")
+            
+            if count > 0:
+                logger.info(f"🧹 Deleted {count} files")
         except Exception as e:
-            logger.warning(f"⚠ فشل الحذف: {e}")
+            logger.warning(f"⚠ Cleanup failed: {e}")
+        
         return count
-
-    # ════════════════════════════════════════════════════════════════
-    #                    دوال مساعدة
-    # ════════════════════════════════════════════════════════════════
-    def validate_for_platform(self, video_path: str, platform: str = "youtube_shorts") -> dict:
-        """التحقق من توافق الفيديو مع المنصة."""
-        info = self.get_video_info(video_path)
-        if not info:
-            return {"valid": False, "errors": ["فشل قراءة معلومات الفيديو"]}
-
-        errors = []
-        warnings = []
-
-        # Platform limits
-        limit = self.PLATFORM_LIMITS.get(platform, 256)
-        if info["size_mb"] > limit:
-            errors.append(f"الحجم ({info['size_mb']:.1f} MB) يتجاوز حد {platform} ({limit} MB)")
-
-        # YouTube Shorts specific
-        if platform == "youtube_shorts":
-            if info["duration"] > 60:
-                errors.append(f"المدة ({info['duration']:.1f}s) تتجاوز 60 ثانية")
-            if info["width"] != 1080 or info["height"] != 1920:
-                warnings.append(f"الأبعاد ({info['width']}x{info['height']}) مفضلة 1080x1920")
-
-        # Codec checks
-        if info["video_codec"] != "h264":
-            warnings.append(f"Video codec '{info['video_codec']}' - الموصى به h264")
-        if info["audio_codec"] not in ("aac", "mp3"):
-            warnings.append(f"Audio codec '{info['audio_codec']}' - الموصى به aac")
-
-        return {
-            "valid": len(errors) == 0,
-            "errors": errors,
-            "warnings": warnings,
-            "info": info,
-        }
+    
+    @staticmethod
+    def list_qualities() -> list[str]:
+        """قائمة الجودات."""
+        return list(QUALITY_PRESETS.keys())
 
 
-# ════════════════════════════════════════════════════════════════════════
-#                    اختبار سريع
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════
+# اختبار
+# ═══════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     import sys
-
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s"
+    )
+    
     if len(sys.argv) < 2:
-        print("Usage: python ffmpeg_builder.py <video.mp4> [info|thumbnail|validate]")
+        print("Usage: python ffmpeg_builder.py <video.mp4> [action] [args]")
+        print("Actions: render, concat, merge, info")
         sys.exit(1)
-
+    
     builder = FFmpegBuilder()
     video = sys.argv[1]
     action = sys.argv[2] if len(sys.argv) > 2 else "info"
-
-    if action == "info":
+    
+    print("=" * 60)
+    print(f"🎞️ FFmpeg Builder v2.0 - {action}")
+    print("=" * 60)
+    
+    if action == "render":
+        output = sys.argv[3] if len(sys.argv) > 3 else "output.mp4"
+        quality = sys.argv[4] if len(sys.argv) > 4 else "high"
+        
+        def progress(msg):
+            print(f"  → {msg}")
+        
+        result = builder.render(
+            video, output, quality=quality,
+            progress_callback=progress,
+        )
+        print()
+        print(result.summary())
+    
+    elif action == "concat":
+        # python script.py video1.mp4 concat output.mp4 video2.mp4 video3.mp4
+        output = sys.argv[3]
+        videos = [video] + sys.argv[4:]
+        
+        result = builder.concat_videos(videos, output)
+        print()
+        print(result.summary())
+    
+    elif action == "merge":
+        # python script.py video.mp4 merge audio.mp3 output.mp4
+        audio = sys.argv[3]
+        output = sys.argv[4]
+        
+        result = builder.merge_video_audio(video, audio, output)
+        print()
+        print(result.summary())
+    
+    elif action == "info":
         info = builder.get_video_info(video)
-        print(json.dumps(info, indent=2))
-
-    elif action == "thumbnail":
-        thumb = video.replace(".mp4", "_thumb.jpg")
-        builder.create_thumbnail(video, thumb)
-        print(f"✓ {thumb}")
-
-    elif action == "validate":
-        result = builder.validate_for_platform(video, "youtube_shorts")
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        import json
+        print(json.dumps(info, indent=2, ensure_ascii=False))
+    
+    print("\n✅ Done!")
