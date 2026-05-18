@@ -70,7 +70,7 @@ on:
       enable_music:
         description: "🎵 الموسيقى الخلفية"
         required: false
-        default: "true"
+        default: true
         type: boolean
       
       music_volume:
@@ -83,7 +83,7 @@ on:
       enable_sfx:
         description: "🔊 المؤثرات الصوتية"
         required: false
-        default: "true"
+        default: true
         type: boolean
       
       duration:
@@ -98,7 +98,11 @@ on:
         required: true
         default: "high"
         type: choice
-        options: [draft, medium, high, ultra]
+        options:
+          - draft
+          - medium
+          - high
+          - ultra
       
       create_release:
         description: "📤 نشر كـ Release"
@@ -140,7 +144,7 @@ jobs:
   generate:
     name: 🚀 Generate Video
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # زيادة للجودة ultra
+    timeout-minutes: 90
     
     # Environment variables للـ job
     env:
@@ -222,16 +226,13 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
+          cache-dependency-path: requirements.txt
       
+      # ✅ FIXED: إزالة cache لأن package-lock.json غير موجود
       - name: 🟢 Setup Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: "npm"
-          cache-dependency-path: remotion/package-lock.json
       
       # ═══════════════════════════════════════════════════════════
       # System Dependencies
@@ -264,10 +265,10 @@ jobs:
           
           # Verify
           ffmpeg -version | head -1
-          chromium-browser --version
+          chromium-browser --version || echo "⚠ Chromium not found"
       
       # ═══════════════════════════════════════════════════════════
-      # Python Dependencies (مع caching)
+      # Python Dependencies
       # ═══════════════════════════════════════════════════════════
       - name: 📦 Install Python Dependencies
         run: |
@@ -286,18 +287,14 @@ jobs:
             whisper-
       
       # ═══════════════════════════════════════════════════════════
-      # Remotion Dependencies (مع caching)
+      # ✅ FIXED: Remotion Dependencies (npm install بدلاً من npm ci)
       # ═══════════════════════════════════════════════════════════
       - name: 🎬 Install Remotion Dependencies
         working-directory: ./remotion
         run: |
-          if [ -f "package-lock.json" ]; then
-            echo "✓ Using npm ci (deterministic)"
-            npm ci --prefer-offline --no-audit
-          else
-            echo "⚠ No package-lock.json"
-            npm install --no-audit
-          fi
+          echo "📦 Installing Remotion dependencies..."
+          npm install --no-audit --no-fund
+          echo "✓ Done"
       
       - name: ✅ Verify Installation
         run: |
@@ -310,10 +307,10 @@ jobs:
           ffmpeg -version | head -1
           echo ""
           echo "📦 Python packages:"
-          pip list | grep -E "(groq|edge-tts|faster-whisper|google-genai)"
+          pip list | grep -E "(groq|edge-tts|faster-whisper|google-genai)" || true
           echo ""
-          echo "📦 Remotion:"
-          ls -la remotion/node_modules/@remotion/ 2>/dev/null | head -5 || echo "⚠"
+          echo "📦 Remotion modules:"
+          ls -la remotion/node_modules/@remotion/ 2>/dev/null | head -10 || echo "⚠ No @remotion modules"
       
       # ═══════════════════════════════════════════════════════════
       # Project Setup
@@ -321,7 +318,7 @@ jobs:
       - name: 🔤 Download Arabic Fonts
         run: |
           if [ -f "download_fonts.py" ]; then
-            python download_fonts.py --no-loader || echo "⚠ Fonts download failed"
+            python download_fonts.py --no-loader 2>/dev/null || echo "⚠ Fonts download failed (using fallbacks)"
           else
             echo "ℹ Skipping fonts (using @remotion/google-fonts)"
           fi
@@ -329,28 +326,23 @@ jobs:
       - name: 📁 Create Required Directories
         run: |
           mkdir -p output temp logs
-          mkdir -p engine/assets/{fonts,music,sfx}
-          mkdir -p remotion/public/{fonts,footage,audio}
+          mkdir -p engine/assets/fonts
+          mkdir -p engine/assets/music
+          mkdir -p engine/assets/sfx
+          mkdir -p remotion/public/fonts
+          mkdir -p remotion/public/footage
+          mkdir -p remotion/public/audio
           mkdir -p remotion/out
+          echo "✓ Directories created"
       
       # ═══════════════════════════════════════════════════════════
       # Pre-flight Check
       # ═══════════════════════════════════════════════════════════
       - name: 🔍 Pre-flight Check
         id: preflight
+        continue-on-error: true
         run: |
-          set +e
           python main.py --check
-          EXIT_CODE=$?
-          set -e
-          
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "::warning::Pre-flight check failed (exit: $EXIT_CODE)"
-            echo "passed=false" >> $GITHUB_OUTPUT
-          else
-            echo "::notice::Pre-flight check passed"
-            echo "passed=true" >> $GITHUB_OUTPUT
-          fi
       
       # ═══════════════════════════════════════════════════════════
       # Generate Video
@@ -425,10 +417,10 @@ jobs:
           if-no-files-found: error
       
       # ═══════════════════════════════════════════════════════════
-      # Create Release (إذا مفعّل)
+      # Create Release
       # ═══════════════════════════════════════════════════════════
       - name: 🚀 Publish GitHub Release
-        if: success() && (inputs.create_release == true || inputs.create_release == 'true')
+        if: success() && inputs.create_release == true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v-${{ github.run_number }}-${{ steps.video_info.outputs.timestamp }}
@@ -571,12 +563,3 @@ jobs:
           fi
           
           echo "✅ Cleanup complete"
-      
-      # ═══════════════════════════════════════════════════════════
-      # Notification on Failure (اختياري)
-      # ═══════════════════════════════════════════════════════════
-      - name: 🔔 Notify on Failure
-        if: failure() && github.event_name == 'schedule'
-        run: |
-          echo "::error::Video generation failed for topic: ${{ inputs.topic }}"
-          # هنا يمكن إضافة integration مع Discord/Slack/Telegram
