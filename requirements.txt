@@ -1,25 +1,122 @@
-# AI & Text Generation
-google-generativeai>=0.7.0
-groq>=0.9.0
+# ╔═══════════════════════════════════════════════════════════════════╗
+# ║              🎬 Viral AI Content Factory                         ║
+# ║                  Production Requirements                          ║
+# ╚═══════════════════════════════════════════════════════════════════╝
+#
+# Python: >=3.11 (recommended), >=3.10 (minimum)
+#
+# Install:
+#   pip install -r requirements.txt
+#
+# Install with dev tools:
+#   pip install -r requirements-dev.txt
+#
 
-# 🆕 Gemini TTS
-google-genai>=0.3.0
+# ═══════════════════════════════════════════════════════════════════
+# 🤖 AI / Script Generation
+# ═══════════════════════════════════════════════════════════════════
 
-# Text To Speech (Arabic)
-edge-tts>=6.1.3
-elevenlabs>=1.2.0
+# Groq (Primary - مجاني وسريع)
+groq>=0.11.0,<1.0.0
 
-# Audio Processing
-pydub>=0.25.1
-yt-dlp>=2024.3.10
+# Gemini AI (Modern SDK - replaces google-generativeai)
+google-genai>=0.3.0,<1.0.0
 
-# Whisper for Word-Level Captions
-faster-whisper>=1.0.0
+# Legacy Gemini SDK (للتوافق الخلفي - اختياري)
+# google-generativeai>=0.7.0,<1.0.0
 
-# Network & API
-requests>=2.31.0
+# ═══════════════════════════════════════════════════════════════════
+# 🎙️ Text-to-Speech (TTS)
+# ═══════════════════════════════════════════════════════════════════
 
-# Utilities
-python-dotenv>=1.0.1
-tqdm>=4.66.4
-colorama>=0.4.6
+# Edge TTS (Primary - مجاني)
+edge-tts>=6.1.10,<7.0.0
+
+# ElevenLabs (Premium - اختياري)
+elevenlabs>=1.7.0,<2.0.0
+
+# ═══════════════════════════════════════════════════════════════════
+# 🎤 Whisper (Speech Recognition للترجمات)
+# ═══════════════════════════════════════════════════════════════════
+
+# Faster Whisper (4x faster than OpenAI Whisper)
+faster-whisper>=1.0.3,<2.0.0
+
+# CTranslate2 (engine for Whisper)
+ctranslate2>=4.0.0,<5.0.0
+
+# ═══════════════════════════════════════════════════════════════════
+# 🎵 Audio Processing
+# ═══════════════════════════════════════════════════════════════════
+
+# PyDub (audio manipulation)
+pydub>=0.25.1,<1.0.0
+
+# NumPy (مطلوب لمعظم audio operations)
+numpy>=1.26.0,<2.0.0
+
+# ═══════════════════════════════════════════════════════════════════
+# 🖼️ Image Processing (للـ thumbnails)
+# ═══════════════════════════════════════════════════════════════════
+
+Pillow>=10.0.0,<11.0.0
+
+# ═══════════════════════════════════════════════════════════════════
+# 🌐 Network & API
+# ═══════════════════════════════════════════════════════════════════
+
+# HTTP requests
+requests>=2.32.0,<3.0.0
+urllib3>=2.0.0,<3.0.0
+
+# Retry mechanism
+tenacity>=8.2.0,<9.0.0
+
+# ═══════════════════════════════════════════════════════════════════
+# 🛠️ Utilities
+# ═══════════════════════════════════════════════════════════════════
+
+# Environment variables
+python-dotenv>=1.0.1,<2.0.0
+
+# Progress bars
+tqdm>=4.66.4,<5.0.0
+
+# Colored terminal output
+colorama>=0.4.6,<1.0.0
+
+# Pretty terminal output (اختياري لكن مفيد)
+rich>=13.7.0,<14.0.0
+
+# ═══════════════════════════════════════════════════════════════════
+# 📦 Data Validation (للـ AI responses)
+# ═══════════════════════════════════════════════════════════════════
+
+# Pydantic (data validation)
+pydantic>=2.5.0,<3.0.0
+
+# ═══════════════════════════════════════════════════════════════════
+# 🎬 Video Download (اختياري - للموسيقى من YouTube)
+# ═══════════════════════════════════════════════════════════════════
+
+# Uncomment if you want to download from YouTube
+# yt-dlp>=2024.5.0
+
+# ═══════════════════════════════════════════════════════════════════
+# 🔧 System Dependencies (لا تُثبّت عبر pip)
+# ═══════════════════════════════════════════════════════════════════
+#
+# هذه يجب تثبيتها يدوياً:
+#
+# 1. FFmpeg & FFprobe:
+#    - Ubuntu: sudo apt install ffmpeg
+#    - macOS:  brew install ffmpeg
+#    - Windows: https://ffmpeg.org/download.html
+#
+# 2. Node.js (للـ Remotion):
+#    - Ubuntu: sudo apt install nodejs npm
+#    - macOS:  brew install node
+#    - Windows: https://nodejs.org
+#
+# 3. Remotion (يُثبّت عبر npm):
+#    cd remotion && npm install
