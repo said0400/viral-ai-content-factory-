@@ -1,11 +1,9 @@
 """
-🎙️ Voice Module v2.0 — توليد ومعالجة الصوت العربي
+🎙️ Voice Module v2.0 — Bridge to engine/voice/
 ═══════════════════════════════════════════════════════════════
-يدعم محركات TTS متعددة:
-  • Edge TTS    (أساسي - مجاني)
-  • Groq TTS    (orpheus arabic)
-  • Gemini TTS  (Google)
-  • ElevenLabs  (premium)
+هذا الملف يعمل كـ bridge بين:
+  • engine.video.voice (المسار الذي يستخدمه الكود الجديد)
+  • engine.voice (المسار الفعلي للملفات)
 ═══════════════════════════════════════════════════════════════
 """
 
@@ -23,19 +21,6 @@ __version__ = "2.0.0"
 # Type Aliases
 # ═══════════════════════════════════════════════════════════════
 TTSEngineType = Literal["auto", "edge", "elevenlabs", "gemini", "groq"]
-
-
-# ═══════════════════════════════════════════════════════════════
-# Lazy imports للأمان
-# ═══════════════════════════════════════════════════════════════
-def _try_import(module_name: str, class_name: str):
-    """استيراد آمن للـ classes."""
-    try:
-        module = __import__(module_name, fromlist=[class_name])
-        return getattr(module, class_name), True
-    except (ImportError, AttributeError) as e:
-        logger.debug(f"{class_name} not available: {e}")
-        return None, False
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -94,7 +79,7 @@ def get_available_engines() -> list[str]:
 
 
 # ═══════════════════════════════════════════════════════════════
-# Factory Function
+# Factory Function (يستخدم engine.voice وليس engine.video.voice)
 # ═══════════════════════════════════════════════════════════════
 def create_tts_engine(prefer: TTSEngineType = "auto", **kwargs):
     """
@@ -102,7 +87,6 @@ def create_tts_engine(prefer: TTSEngineType = "auto", **kwargs):
     
     Args:
         prefer: المحرك المفضل (auto/edge/groq/gemini/elevenlabs)
-        **kwargs: arguments للـ engine
     
     Returns:
         TTS engine instance
@@ -120,7 +104,7 @@ def create_tts_engine(prefer: TTSEngineType = "auto", **kwargs):
     # ═══ Edge ═══
     if prefer == "edge":
         try:
-            from engine.video.voice.edge_tts_engine import EdgeTTS
+            from engine.voice.edge_tts_engine import EdgeTTS
             logger.info("🎙️ TTS: EdgeTTS")
             return EdgeTTS(**kwargs)
         except ImportError as e:
@@ -132,19 +116,18 @@ def create_tts_engine(prefer: TTSEngineType = "auto", **kwargs):
     # ═══ Groq ═══
     if prefer == "groq":
         try:
-            from engine.video.voice.groq_tts import GroqTTS
+            from engine.voice.groq_tts import GroqTTS
             logger.info("🎙️ TTS: GroqTTS")
             return GroqTTS(**kwargs)
         except ImportError as e:
             raise RuntimeError(
-                f"❌ GroqTTS غير متاح: {e}\n"
-                f"   تحقق من GROQ_API_KEY"
+                f"❌ GroqTTS غير متاح: {e}"
             )
     
     # ═══ Gemini ═══
     if prefer == "gemini":
         try:
-            from engine.video.voice.gemini_tts_engine import GeminiTTSEngine
+            from engine.voice.gemini_tts_engine import GeminiTTSEngine
             logger.info("🎙️ TTS: GeminiTTS")
             return GeminiTTSEngine(**kwargs)
         except ImportError as e:
@@ -156,13 +139,12 @@ def create_tts_engine(prefer: TTSEngineType = "auto", **kwargs):
     # ═══ ElevenLabs ═══
     if prefer == "elevenlabs":
         try:
-            from engine.video.voice.elevenlabs_tts import ElevenLabsTTS
+            from engine.voice.elevenlabs_tts import ElevenLabsTTS
             logger.info("🎙️ TTS: ElevenLabsTTS")
             return ElevenLabsTTS(**kwargs)
         except ImportError as e:
             raise RuntimeError(
-                f"❌ ElevenLabsTTS غير متاح: {e}\n"
-                f"   تحقق من ELEVENLABS_API_KEY"
+                f"❌ ElevenLabsTTS غير متاح: {e}"
             )
     
     # ═══ Auto Mode ═══
@@ -189,11 +171,7 @@ def create_tts_engine(prefer: TTSEngineType = "auto", **kwargs):
                     continue
         
         raise RuntimeError(
-            "❌ لا يوجد محرك TTS متاح!\n"
-            "   ثبّت أحد:\n"
-            "     • pip install edge-tts (مجاني)\n"
-            "     • pip install groq\n"
-            "     • pip install google-genai\n"
+            "❌ لا يوجد محرك TTS متاح!"
         )
     
     raise ValueError(
@@ -203,20 +181,17 @@ def create_tts_engine(prefer: TTSEngineType = "auto", **kwargs):
 
 
 # ═══════════════════════════════════════════════════════════════
-# Convenience Functions
+# Helpers
 # ═══════════════════════════════════════════════════════════════
 def get_default_voice() -> str:
-    """الصوت الافتراضي."""
     return os.getenv("TTS_VOICE", "ar-SA-HamedNeural")
 
 
 def get_default_engine() -> str:
-    """المحرك الافتراضي."""
     return os.getenv("TTS_ENGINE", "auto")
 
 
 def list_available_engines() -> dict[str, bool]:
-    """قاموس بحالة كل محرك."""
     return {
         "edge": check_edge_available(),
         "groq": check_groq_available(),
@@ -226,80 +201,80 @@ def list_available_engines() -> dict[str, bool]:
 
 
 # ═══════════════════════════════════════════════════════════════
-# Lazy imports للـ classes
+# Lazy imports للـ classes (من engine.voice)
 # ═══════════════════════════════════════════════════════════════
 def __getattr__(name: str):
-    """Lazy import للـ TTS classes."""
+    """Lazy import للـ TTS classes من engine.voice."""
     
     if name == "EdgeTTS":
         try:
-            from engine.video.voice.edge_tts_engine import EdgeTTS
+            from engine.voice.edge_tts_engine import EdgeTTS
             return EdgeTTS
         except ImportError as e:
-            raise ImportError(f"EdgeTTS غير متاح: {e}")
+            raise ImportError(f"EdgeTTS: {e}")
     
     if name == "GroqTTS":
         try:
-            from engine.video.voice.groq_tts import GroqTTS
+            from engine.voice.groq_tts import GroqTTS
             return GroqTTS
         except ImportError as e:
-            raise ImportError(f"GroqTTS غير متاح: {e}")
+            raise ImportError(f"GroqTTS: {e}")
     
     if name == "GeminiTTSEngine":
         try:
-            from engine.video.voice.gemini_tts_engine import GeminiTTSEngine
+            from engine.voice.gemini_tts_engine import GeminiTTSEngine
             return GeminiTTSEngine
         except ImportError as e:
-            raise ImportError(f"GeminiTTS غير متاح: {e}")
+            raise ImportError(f"GeminiTTS: {e}")
     
     if name == "ElevenLabsTTS":
         try:
-            from engine.video.voice.elevenlabs_tts import ElevenLabsTTS
+            from engine.voice.elevenlabs_tts import ElevenLabsTTS
             return ElevenLabsTTS
         except ImportError as e:
-            raise ImportError(f"ElevenLabsTTS غير متاح: {e}")
+            raise ImportError(f"ElevenLabsTTS: {e}")
     
     if name == "WhisperTranscriber":
         try:
-            from engine.video.voice.whisper_transcriber import WhisperTranscriber
+            from engine.voice.whisper_transcriber import WhisperTranscriber
             return WhisperTranscriber
         except ImportError as e:
-            raise ImportError(f"Whisper غير متاح: {e}")
+            raise ImportError(f"Whisper: {e}")
     
     if name == "AudioFX":
         try:
-            from engine.video.voice.audio_fx import AudioFX
+            from engine.voice.audio_fx import AudioFX
             return AudioFX
         except ImportError as e:
-            raise ImportError(f"AudioFX غير متاح: {e}")
+            raise ImportError(f"AudioFX: {e}")
     
     if name == "MusicEngine":
         try:
-            from engine.video.voice.music_engine import MusicEngine
+            from engine.voice.music_engine import MusicEngine
             return MusicEngine
         except ImportError as e:
-            raise ImportError(f"MusicEngine غير متاح: {e}")
+            raise ImportError(f"MusicEngine: {e}")
     
     if name == "SFXManager":
         try:
-            from engine.video.voice.sfx_manager import SFXManager
+            from engine.voice.sfx_manager import SFXManager
             return SFXManager
         except ImportError as e:
-            raise ImportError(f"SFXManager غير متاح: {e}")
+            raise ImportError(f"SFXManager: {e}")
     
     if name == "BreathingEngine":
         try:
-            from engine.video.voice.breathing_engine import BreathingEngine
+            from engine.voice.breathing_engine import BreathingEngine
             return BreathingEngine
         except ImportError as e:
-            raise ImportError(f"BreathingEngine غير متاح: {e}")
+            raise ImportError(f"BreathingEngine: {e}")
     
     if name == "AudioOptimizer":
         try:
-            from engine.video.voice.audio_optimizer import AudioOptimizer
+            from engine.voice.audio_optimizer import AudioOptimizer
             return AudioOptimizer
         except ImportError as e:
-            raise ImportError(f"AudioOptimizer غير متاح: {e}")
+            raise ImportError(f"AudioOptimizer: {e}")
     
     raise AttributeError(
         f"module 'engine.video.voice' has no attribute '{name}'"
@@ -311,11 +286,7 @@ def __getattr__(name: str):
 # ═══════════════════════════════════════════════════════════════
 __all__ = [
     "__version__",
-    
-    # Factory
     "create_tts_engine",
-    
-    # Lazy-loaded classes
     "EdgeTTS",
     "GroqTTS",
     "GeminiTTSEngine",
@@ -326,8 +297,6 @@ __all__ = [
     "SFXManager",
     "BreathingEngine",
     "AudioOptimizer",
-    
-    # Helpers
     "check_edge_available",
     "check_groq_available",
     "check_gemini_available",
@@ -336,7 +305,5 @@ __all__ = [
     "list_available_engines",
     "get_default_voice",
     "get_default_engine",
-    
-    # Types
     "TTSEngineType",
 ]
