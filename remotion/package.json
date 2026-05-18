@@ -4,25 +4,17 @@
   "description": "Remotion video renderer for Viral AI Content Factory (Arabic Shorts)",
   "private": true,
   "type": "module",
-  
   "scripts": {
-    "// === Studio (Development) === ": "",
     "start": "remotion studio",
     "studio": "remotion studio",
     "dev": "remotion studio",
-    
-    "// === Render === ": "",
-    "render": "node -e \"require('fs').mkdirSync('out',{recursive:true})\" && remotion render src/index.ts ShortsVideo out/video.mp4",
-    "render:props": "node -e \"require('fs').mkdirSync('out',{recursive:true})\" && remotion render src/index.ts ShortsVideo out/video.mp4 --props=props.json",
+    "render": "remotion render src/index.ts ShortsVideo out/video.mp4",
+    "render:props": "remotion render src/index.ts ShortsVideo out/video.mp4 --props=props.json",
     "render:draft": "remotion render src/index.ts ShortsVideo out/draft.mp4 --crf=28 --concurrency=4",
     "render:high": "remotion render src/index.ts ShortsVideo out/video.mp4 --crf=19 --concurrency=2",
     "render:ultra": "remotion render src/index.ts ShortsVideo out/video.mp4 --crf=17 --concurrency=4",
-    
-    "// === Bundle === ": "",
     "build": "remotion bundle src/index.ts",
     "bundle": "remotion bundle src/index.ts",
-    
-    "// === Diagnostics === ": "",
     "compositions": "remotion compositions src/index.ts",
     "check": "tsc --noEmit",
     "type-check": "tsc --noEmit",
@@ -30,67 +22,45 @@
     "lint:fix": "eslint 'src/**/*.{ts,tsx}' --fix",
     "format": "prettier --write 'src/**/*.{ts,tsx,json}'",
     "format:check": "prettier --check 'src/**/*.{ts,tsx,json}'",
-    
-    "// === Maintenance === ": "",
     "upgrade": "remotion upgrade",
     "clean": "rimraf out/ .remotion/ node_modules/.cache/",
     "clean:all": "rimraf out/ .remotion/ node_modules/",
     "reinstall": "npm run clean:all && npm install",
-    
-    "// === Quality === ": "",
     "preflight": "npm run type-check && npm run lint && npm run format:check",
     "validate": "npm run preflight && npm run compositions"
   },
-  
   "dependencies": {
-    "// === Remotion Core === ": "",
     "remotion": "4.0.0",
     "@remotion/cli": "4.0.0",
     "@remotion/bundler": "4.0.0",
     "@remotion/renderer": "4.0.0",
-    
-    "// === Remotion Features === ": "",
     "@remotion/media-utils": "4.0.0",
     "@remotion/transitions": "4.0.0",
     "@remotion/google-fonts": "4.0.0",
     "@remotion/shapes": "4.0.0",
     "@remotion/preload": "4.0.0",
     "@remotion/noise": "4.0.0",
-    
-    "// === React === ": "",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    
-    "// === Utilities === ": "",
     "zod": "^3.22.0"
   },
-  
   "devDependencies": {
-    "// === TypeScript === ": "",
     "typescript": "5.3.3",
     "@types/react": "18.3.0",
     "@types/react-dom": "18.3.0",
     "@types/node": "20.10.0",
-    
-    "// === Linting === ": "",
     "eslint": "8.57.0",
     "@typescript-eslint/parser": "7.0.0",
     "@typescript-eslint/eslint-plugin": "7.0.0",
     "eslint-plugin-react": "7.34.0",
     "eslint-plugin-react-hooks": "4.6.0",
-    
-    "// === Formatting === ": "",
     "prettier": "3.2.0",
-    
-    "// === Cleanup === ": "",
     "rimraf": "5.0.5"
   },
-  
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
   },
-  
   "keywords": [
     "remotion",
     "arabic",
@@ -107,19 +77,11 @@
     "subtitles",
     "rtl"
   ],
-  
   "author": "AI Shorts Generator",
   "license": "MIT",
-  
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/viral-ai-factory.git",
+    "url": "https://github.com/said0400/viral-ai-content-factory.git",
     "directory": "remotion"
-  },
-  
-  "homepage": "https://github.com/yourusername/viral-ai-factory#readme",
-  
-  "bugs": {
-    "url": "https://github.com/yourusername/viral-ai-factory/issues"
   }
 }
