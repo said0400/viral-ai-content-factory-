@@ -168,18 +168,18 @@ class GenerationResult:
             f"\n{'=' * 60}",
             f"📊 Generation Result {status}",
             f"{'=' * 60}",
-            f"   • Topic: {self.topic}",
-            f"   • Type: {self.content_type}",
-            f"   • Duration: {self.duration:.1f}s",
-            f"   • Output: {self.output_path}",
-            f"   • Size: {self.file_size_mb:.1f} MB",
-            f"   • Total time: {self.total_time:.1f}s",
+            f"    • Topic: {self.topic}",
+            f"    • Type: {self.content_type}",
+            f"    • Duration: {self.duration:.1f}s",
+            f"    • Output: {self.output_path}",
+            f"    • Size: {self.file_size_mb:.1f} MB",
+            f"    • Total time: {self.total_time:.1f}s",
         ]
         
         if self.error:
-            lines.append(f"   • Error: {self.error}")
+            lines.append(f"    • Error: {self.error}")
         if self.stage_failed:
-            lines.append(f"   • Failed at: {self.stage_failed}")
+            lines.append(f"    • Failed at: {self.stage_failed}")
         
         return "\n".join(lines)
 
@@ -221,8 +221,7 @@ def check_requirements() -> dict:
     
     packages = [
         ("groq", "Groq AI"),
-        ("google.genai", "Gemini AI"),
-        ("google.generativeai", "Gemini (legacy)"),
+        ("google.genai", "Gemini AI"), # الاعتماد الحصري على حزمة 2026 المحدثة والمدعومة رسميًا
         ("edge_tts", "Edge TTS"),
         ("elevenlabs", "ElevenLabs"),
         ("faster_whisper", "Whisper"),
