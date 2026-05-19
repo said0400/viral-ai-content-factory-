@@ -284,7 +284,7 @@ class RemotionRenderer:
         self,
         remotion_dir: Optional[str] = None,
         composition_id: Optional[str] = None,
-        use_symlinks: bool = True,
+        use_symlinks: bool = False,  # ✅ FIXED: Force copy
         keep_props_file: bool = False,
         cleanup_on_success: bool = True,
     ):
@@ -301,7 +301,7 @@ class RemotionRenderer:
         self.h = int(os.getenv("VIDEO_HEIGHT", "1920"))
         self.fps = int(os.getenv("VIDEO_FPS", "30"))
         
-        self.use_symlinks = use_symlinks
+        self.use_symlinks = False  # ✅ Force copy (symlinks لا تعمل في Remotion)
         self.keep_props_file = keep_props_file
         self.cleanup_on_success = cleanup_on_success
         
