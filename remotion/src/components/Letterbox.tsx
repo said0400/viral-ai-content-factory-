@@ -1,29 +1,31 @@
 /**
- * 🎞️ Letterbox Component v2.0
+ * 🎞️ Letterbox Component v2.1
  * ═══════════════════════════════════════════════════════════════
- * شرائط سوداء سينمائية:
- *   ✓ Horizontal & Vertical letterbox
- *   ✓ Slide-in / Fade-in animations
- *   ✓ Slide-out في النهاية
- *   ✓ Gradient support
- *   ✓ Text overlay (LetterboxWithText)
- *   ✓ خط فاصل احترافي
- *   ✓ Performance optimized
+ * إصلاحات v2.1:
+ *   ✓ import React مضاف
+ *   ✓ LetterboxConfig inline (لا @types alias)
  * ═══════════════════════════════════════════════════════════════
  */
 
-import { useMemo, memo, ReactNode } from 'react';
+import React, { useMemo, memo, ReactNode } from 'react';
 import {
   AbsoluteFill,
   useCurrentFrame,
   useVideoConfig,
   interpolate,
 } from 'remotion';
-import type { LetterboxConfig } from '@types/index';
 
 // ═══════════════════════════════════════════════════════════════
-// Types
+// Types (inline)
 // ═══════════════════════════════════════════════════════════════
+interface LetterboxConfig {
+  name: string;
+  enabled: boolean;
+  barRatio?: number;
+  color?: string;
+  opacity?: number;
+}
+
 export type LetterboxOrientation = 'horizontal' | 'vertical' | 'both';
 export type LetterboxAnimation = 'slide' | 'fade' | 'none';
 
@@ -31,29 +33,13 @@ export interface LetterboxProps {
   config: LetterboxConfig;
   width: number;
   height: number;
-  
-  /** اتجاه الشرائط */
   orientation?: LetterboxOrientation;
-  
-  /** نوع الأنيميشن */
   animation?: LetterboxAnimation;
-  
-  /** مدة الـ slide-in (frames) */
   slideInFrames?: number;
-  
-  /** تفعيل slide-out في النهاية */
   slideOut?: boolean;
-  
-  /** مدة slide-out (frames) */
   slideOutFrames?: number;
-  
-  /** إظهار الخط الفاصل */
   showSeparatorLine?: boolean;
-  
-  /** لون الخط الفاصل */
   separatorColor?: string;
-  
-  /** z-index */
   zIndex?: number;
 }
 
@@ -92,7 +78,6 @@ const calculateAnimationProgress = (
   slideOutFrames: number,
   slideOut: boolean,
 ): number => {
-  // Slide in
   const inProgress = interpolate(
     frame,
     [0, slideInFrames],
@@ -100,7 +85,6 @@ const calculateAnimationProgress = (
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
   );
   
-  // Slide out (if enabled)
   if (slideOut) {
     const outStart = totalFrames - slideOutFrames;
     const outProgress = interpolate(
@@ -116,7 +100,7 @@ const calculateAnimationProgress = (
 };
 
 // ═══════════════════════════════════════════════════════════════
-// 🎞️ Main Letterbox Component
+// Main Letterbox
 // ═══════════════════════════════════════════════════════════════
 export const Letterbox: React.FC<LetterboxProps> = memo(
   ({
@@ -135,12 +119,10 @@ export const Letterbox: React.FC<LetterboxProps> = memo(
     const frame = useCurrentFrame();
     const { durationInFrames } = useVideoConfig();
     
-    // إذا معطّل
     if (!config.enabled) {
       return null;
     }
     
-    // ─── Calculate Dimensions ──────────────────────────────────
     const barRatio = config.barRatio ?? DEFAULT_BAR_RATIO;
     const barColor = config.color ?? DEFAULT_BAR_COLOR;
     const barOpacity = config.opacity ?? DEFAULT_BAR_OPACITY;
@@ -148,7 +130,6 @@ export const Letterbox: React.FC<LetterboxProps> = memo(
     const horizontalBarHeight = Math.floor(height * barRatio);
     const verticalBarWidth = Math.floor(width * barRatio);
     
-    // ─── Animation Progress ────────────────────────────────────
     const progress = useMemo(
       () =>
         animation === 'none'
@@ -163,7 +144,6 @@ export const Letterbox: React.FC<LetterboxProps> = memo(
       [frame, durationInFrames, slideInFrames, slideOutFrames, slideOut, animation],
     );
     
-    // ─── Render Horizontal Bars ────────────────────────────────
     const renderHorizontalBars = () => {
       const topOffset =
         animation === 'slide'
@@ -179,7 +159,6 @@ export const Letterbox: React.FC<LetterboxProps> = memo(
       
       return (
         <>
-          {/* Top Bar */}
           <div
             style={{
               position: 'absolute',
@@ -194,7 +173,6 @@ export const Letterbox: React.FC<LetterboxProps> = memo(
             }}
           />
           
-          {/* Bottom Bar */}
           <div
             style={{
               position: 'absolute',
@@ -209,7 +187,6 @@ export const Letterbox: React.FC<LetterboxProps> = memo(
             }}
           />
           
-          {/* Separator Lines */}
           {showSeparatorLine && (
             <>
               <div
@@ -240,7 +217,6 @@ export const Letterbox: React.FC<LetterboxProps> = memo(
       );
     };
     
-    // ─── Render Vertical Bars ──────────────────────────────────
     const renderVerticalBars = () => {
       const leftOffset =
         animation === 'slide'
@@ -256,7 +232,6 @@ export const Letterbox: React.FC<LetterboxProps> = memo(
       
       return (
         <>
-          {/* Left Bar */}
           <div
             style={{
               position: 'absolute',
@@ -271,7 +246,6 @@ export const Letterbox: React.FC<LetterboxProps> = memo(
             }}
           />
           
-          {/* Right Bar */}
           <div
             style={{
               position: 'absolute',
@@ -290,12 +264,7 @@ export const Letterbox: React.FC<LetterboxProps> = memo(
     };
     
     return (
-      <AbsoluteFill
-        style={{
-          pointerEvents: 'none',
-          zIndex,
-        }}
-      >
+      <AbsoluteFill style={{ pointerEvents: 'none', zIndex }}>
         {(orientation === 'horizontal' || orientation === 'both') &&
           renderHorizontalBars()}
         
@@ -309,7 +278,7 @@ export const Letterbox: React.FC<LetterboxProps> = memo(
 Letterbox.displayName = 'Letterbox';
 
 // ═══════════════════════════════════════════════════════════════
-// 📝 Letterbox with Text
+// Letterbox with Text
 // ═══════════════════════════════════════════════════════════════
 export const LetterboxWithText: React.FC<LetterboxWithTextProps> = memo(
   ({
@@ -369,7 +338,7 @@ export const LetterboxWithText: React.FC<LetterboxWithTextProps> = memo(
 LetterboxWithText.displayName = 'LetterboxWithText';
 
 // ═══════════════════════════════════════════════════════════════
-// 🌈 Gradient Letterbox
+// Gradient Letterbox
 // ═══════════════════════════════════════════════════════════════
 export const GradientLetterbox: React.FC<GradientLetterboxProps> = memo(
   ({
@@ -388,7 +357,6 @@ export const GradientLetterbox: React.FC<GradientLetterboxProps> = memo(
     
     return (
       <AbsoluteFill style={{ pointerEvents: 'none', zIndex }}>
-        {/* Top */}
         <div
           style={{
             position: 'absolute',
@@ -401,7 +369,6 @@ export const GradientLetterbox: React.FC<GradientLetterboxProps> = memo(
           }}
         />
         
-        {/* Bottom (gradient معكوس بدل rotate) */}
         <div
           style={{
             position: 'absolute',
@@ -421,36 +388,16 @@ export const GradientLetterbox: React.FC<GradientLetterboxProps> = memo(
 GradientLetterbox.displayName = 'GradientLetterbox';
 
 // ═══════════════════════════════════════════════════════════════
-// 🎬 Cinematic Letterbox Preset
+// Preset Letterbox
 // ═══════════════════════════════════════════════════════════════
 export type LetterboxPresetName = 'cinematic' | 'thin' | 'thick' | 'imax' | 'widescreen';
 
 const LETTERBOX_PRESETS: Record<LetterboxPresetName, Partial<LetterboxConfig>> = {
-  cinematic: {
-    barRatio: 0.055,
-    color: '#000000',
-    opacity: 0.92,
-  },
-  thin: {
-    barRatio: 0.03,
-    color: '#000000',
-    opacity: 1.0,
-  },
-  thick: {
-    barRatio: 0.08,
-    color: '#000000',
-    opacity: 1.0,
-  },
-  imax: {
-    barRatio: 0.12,
-    color: '#000000',
-    opacity: 1.0,
-  },
-  widescreen: {
-    barRatio: 0.07,
-    color: '#000000',
-    opacity: 0.95,
-  },
+  cinematic: { barRatio: 0.055, color: '#000000', opacity: 0.92 },
+  thin: { barRatio: 0.03, color: '#000000', opacity: 1.0 },
+  thick: { barRatio: 0.08, color: '#000000', opacity: 1.0 },
+  imax: { barRatio: 0.12, color: '#000000', opacity: 1.0 },
+  widescreen: { barRatio: 0.07, color: '#000000', opacity: 0.95 },
 };
 
 interface PresetLetterboxProps {
@@ -489,7 +436,4 @@ export const PresetLetterbox: React.FC<PresetLetterboxProps> = memo(
 
 PresetLetterbox.displayName = 'PresetLetterbox';
 
-// ═══════════════════════════════════════════════════════════════
-// Export
-// ═══════════════════════════════════════════════════════════════
 export default Letterbox;
