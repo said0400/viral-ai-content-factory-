@@ -1,4 +1,3 @@
-"""
 🎙️ Gemini TTS Engine v4.1 — Rate Limit Friendly
 ═══════════════════════════════════════════════════════════════
 الإستراتيجية:
@@ -425,7 +424,7 @@ class GeminiTTSEngine(BaseTTS):
         
         # الإعدادات
         mood = script.get("music_mood", "motivation")
-        voice_name = voice or self._select_voice(script, mood)
+        voice_name = voice or self._select_voice_for_mood(mood)
         style_preset = style or self._select_style_for_mood(mood)
         
         # استخراج المشاهد
@@ -855,6 +854,52 @@ class GeminiTTSEngine(BaseTTS):
             raw_audio = self._convert_to_wav(raw_audio, mime_type)
         
         return raw_audio
+
+    def _build_prompt(self, text: str, style: StylePreset) -> str:
+        """بناء الـ prompt وتضمين الملاحظات الإخراجية للأسلوب."""
+        return (
+            f"[Voice Profile: {style.audio_profile}]\n"
+            f"[Director's Note: {style.directors_note}]\n"
+            f"[Context: {style.scene_context}]\n"
+            f"Read the following text naturally:\n{text}"
+        )
+
+    def _convert_to_wav(self, raw_audio: bytes, mime_type: Optional[str]) -> bytes:
+        """تحويل البيانات الصوتية المستلمة إلى WAV متوافق باستخدام pydub."""
+        try:
+            format_ext = "mp3" if mime_type and "mp3" in mime_type else "ogg"
+            with tempfile.NamedTemporaryFile(suffix=f".{format_ext}", delete=False) as f:
+                f.write(raw_audio)
+                temp_name = f.name
+            
+            segment = self._AudioSegment.from_file(temp_name, format=format_ext)
+            out_buf = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            segment.export(out_buf.name, format="wav")
+            
+            with open(out_buf.name, "rb") as out_f:
+                wav_data = out_f.read()
+                
+            os.unlink(temp_name)
+            os.unlink(out_buf.name)
+            return wav_data
+        except Exception as e:
+            logger.error(f"⚠️ فشل التحويل إلى WAV الأساسي: {e}. سيتم إرجاع البيانات الخام.")
+            return raw_audio
+
+    def _ensure_output_dir(self, output_path: str) -> None:
+        """التأكد من وجود المجلد الهدف."""
+        parent = Path(output_path).parent
+        if parent:
+            parent.mkdir(parents=True, exist_ok=True)
+
+    def _silence_result(self, output_path: str, error_msg: str) -> TTSResult:
+        """دالة للتعافي السريع وإنشاء ملف فارغ/صامت عند حدوث خطأ فادح."""
+        return TTSResult(
+            status=TTSStatus.FAILED,
+            output_path=output_path,
+            voice_used=self.voice_name,
+            error=error_msg
+        )
     
     # ═══════════════════════════════════════════════════════════════
     # WAV Merging
@@ -927,175 +972,3 @@ class GeminiTTSEngine(BaseTTS):
             remaining = remaining[best_pos:].strip()
         
         return [c for c in chunks if c]
-    
-    # ═══════════════════════════════════════════════════════════════
-    # Prompt Building
-    # ═══════════════════════════════════════════════════════════════
-    def _build_prompt(self, text: str, style_config: StylePreset) -> str:
-        """بناء الـ prompt."""
-        return f"""Read the following transcript based on the audio profile and director's note.
-
-# Audio Profile
-{style_config.audio_profile}
-
-# Director's note
-{style_config.directors_note}
-
-## Scene:
-The Sound Stage Booth.
-
-## Sample Context:
-{style_config.scene_context}
-
-## Transcript:
-{text}"""
-    
-    # ═══════════════════════════════════════════════════════════════
-    # WAV Conversion (PCM → WAV)
-    # ═══════════════════════════════════════════════════════════════
-    def _convert_to_wav(self, audio_data: bytes, mime_type: str) -> bytes:
-        """تحويل PCM إلى WAV."""
-        params = self._parse_mime(mime_type)
-        bps = params["bits_per_sample"]
-        rate = params["rate"]
-        nc = 1  # mono
-        ds = len(audio_data)
-        ba = nc * (bps // 8)
-        br = rate * ba
-        
-        header = struct.pack(
-            "<4sI4s4sIHHIIHH4sI",
-            b"RIFF", 36 + ds, b"WAVE", b"fmt ",
-            16, 1, nc, rate, br, ba, bps,
-            b"data", ds,
-        )
-        return header + audio_data
-    
-    def _parse_mime(self, mime_type: str) -> dict[str, int]:
-        """استخراج معلومات MIME."""
-        bps = 16
-        rate = 24000
-        
-        if not mime_type:
-            return {"bits_per_sample": bps, "rate": rate}
-        
-        for param in mime_type.split(";"):
-            param = param.strip()
-            if param.lower().startswith("rate="):
-                try:
-                    rate = int(param.split("=", 1)[1])
-                except (ValueError, IndexError):
-                    pass
-            elif param.startswith("audio/L"):
-                try:
-                    bps = int(param.split("L", 1)[1])
-                except (ValueError, IndexError):
-                    pass
-        
-        return {"bits_per_sample": bps, "rate": rate}
-    
-    # ═══════════════════════════════════════════════════════════════
-    # Required from BaseTTS
-    # ═══════════════════════════════════════════════════════════════
-    def _generate_audio_data(
-        self,
-        text: str,
-        voice: str,
-        **kwargs,
-    ) -> Optional[bytes]:
-        """للتوافق مع BaseTTS - نص واحد بدون scenes."""
-        try:
-            return self._call_gemini_api(
-                text, voice, kwargs.get("style", self.style_preset)
-            )
-        except Exception as e:
-            logger.error(f"❌ فشل: {e}")
-            return None
-    
-    # ═══════════════════════════════════════════════════════════════
-    # Public Utilities
-    # ═══════════════════════════════════════════════════════════════
-    @staticmethod
-    def list_voices() -> dict[str, VoiceInfo]:
-        """قائمة الأصوات."""
-        return GEMINI_VOICES.copy()
-    
-    @staticmethod
-    def list_styles() -> dict[str, StylePreset]:
-        """قائمة الـ styles."""
-        return STYLE_PRESETS.copy()
-    
-    def print_stats(self):
-        """طباعة الإحصائيات."""
-        print(self.stats.summary())
-
-
-# ═══════════════════════════════════════════════════════════════════
-# اختبار سريع
-# ═══════════════════════════════════════════════════════════════════
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s"
-    )
-    
-    print("=" * 60)
-    print("🎙️ Gemini TTS v4.1 Test (Rate Limit Friendly)")
-    print("=" * 60)
-    
-    print(f"\n📋 Voices: {len(GEMINI_VOICES)}")
-    for vid, info in GEMINI_VOICES.items():
-        print(f"   • {info.name} ({info.gender}) - {info.description}")
-    
-    print(f"\n🎨 Styles: {len(STYLE_PRESETS)}")
-    for name in STYLE_PRESETS:
-        print(f"   • {name}")
-    
-    try:
-        # ✅ Sequential mode (آمن من rate limit)
-        tts = GeminiTTSEngine(
-            cache_enabled=True,
-            parallel_scenes=1,  # Sequential
-            inter_request_delay=4.5,
-        )
-        
-        test_script = {
-            "scenes": [
-                {
-                    "text": "هل تعلم أن 95% من الناس يفشلون بسبب هذا الخطأ؟",
-                    "voice_tone": "curious",
-                },
-                {
-                    "text": "السر بسيط جداً... لكن قليلين من يطبقونه.",
-                    "voice_tone": "intense",
-                },
-                {
-                    "text": "ابدأ الآن وستلاحظ الفرق بعد 21 يوم.",
-                    "voice_tone": "authoritative",
-                },
-            ],
-            "cta": "شارك هذا الفيديو!",
-            "music_mood": "motivation",
-        }
-        
-        def progress(p, msg):
-            print(f"  [{p*100:3.0f}%] {msg}")
-        
-        result = tts.generate_audio(
-            test_script,
-            "test_gemini.mp3",
-            progress_callback=progress,
-        )
-        
-        print(f"\n📊 Result:")
-        print(f"   Status: {result.status.value}")
-        print(f"   Success: {result.success}")
-        print(f"   Voice: {result.voice_used}")
-        print(f"   Duration: ~{result.duration_estimate:.1f}s")
-        print(f"   File: {result.file_size:,} bytes")
-        
-        print()
-        tts.print_stats()
-        
-    except RuntimeError as e:
-        print(f"\n❌ {e}")
