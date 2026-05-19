@@ -1,69 +1,58 @@
 /**
- * 🎨 Color Grade Component v2.0
+ * 🎨 Color Grade Component v2.1
  * ═══════════════════════════════════════════════════════════════
- * التدرج اللوني السينمائي:
- *   ✓ CSS Filters
- *   ✓ Color Tinting مع Blend Modes
- *   ✓ Vignette
- *   ✓ Film Grain (subtle)
- *   ✓ 6 Film presets
- *   ✓ Custom presets
- *   ✓ Performance optimized
+ * إصلاحات v2.1:
+ *   ✓ import React مضاف
+ *   ✓ GradeConfig inline (لا @types alias)
  * ═══════════════════════════════════════════════════════════════
  */
 
-import { useMemo, memo, ReactNode } from 'react';
+import React, { useMemo, memo, ReactNode } from 'react';
 import { AbsoluteFill } from 'remotion';
-import type { GradeConfig } from '@types/index';
 
 // ═══════════════════════════════════════════════════════════════
-// Types
+// Types (inline)
 // ═══════════════════════════════════════════════════════════════
-export interface ColorGradeProps {
-  config?: GradeConfig | null;
-  children: ReactNode;
-  /** Override tint opacity */
-  tintOpacity?: number;
-  /** Override blend mode */
-  blendMode?: React.CSSProperties['mixBlendMode'];
-}
-
-export interface CustomColorGradeProps {
-  /** Contrast (1.0 = طبيعي) */
-  contrast?: number;
-  /** Saturation (1.0 = طبيعي) */
-  saturate?: number;
-  /** Brightness (1.0 = طبيعي) */
-  brightness?: number;
-  /** Hue rotation in degrees */
-  hue?: number;
-  /** Blur in pixels */
-  blur?: number;
-  /** Invert (0 or 1) */
-  invert?: boolean;
-  /** Sepia (0 - 1) */
-  sepia?: number;
-  /** Grayscale (0 - 1) */
-  grayscale?: number;
-  /** Color tint */
-  tint?: TintColor;
-  /** Tint opacity */
-  tintOpacity?: number;
-  /** Blend mode */
-  blendMode?: React.CSSProperties['mixBlendMode'];
-  /** Vignette effect */
-  vignette?: boolean;
-  vignetteIntensity?: number;
-  /** Film grain */
-  grain?: boolean;
-  grainIntensity?: number;
-  children: ReactNode;
-}
-
 export interface TintColor {
   r: number;
   g: number;
   b: number;
+}
+
+interface GradeConfig {
+  name: string;
+  filter?: string;
+  tint?: TintColor;
+  vignette?: boolean;
+  vignetteIntensity?: number;
+  grain?: boolean;
+  grainIntensity?: number;
+}
+
+export interface ColorGradeProps {
+  config?: GradeConfig | null;
+  children: ReactNode;
+  tintOpacity?: number;
+  blendMode?: React.CSSProperties['mixBlendMode'];
+}
+
+export interface CustomColorGradeProps {
+  contrast?: number;
+  saturate?: number;
+  brightness?: number;
+  hue?: number;
+  blur?: number;
+  invert?: boolean;
+  sepia?: number;
+  grayscale?: number;
+  tint?: TintColor;
+  tintOpacity?: number;
+  blendMode?: React.CSSProperties['mixBlendMode'];
+  vignette?: boolean;
+  vignetteIntensity?: number;
+  grain?: boolean;
+  grainIntensity?: number;
+  children: ReactNode;
 }
 
 export interface FilmLookConfig {
@@ -92,7 +81,6 @@ export const FilmLookPresets: Record<string, FilmLookConfig> = {
     vignette: true,
     vignetteIntensity: 0.4,
   },
-  
   filmNoir: {
     contrast: 1.5,
     saturate: 0.0,
@@ -102,7 +90,6 @@ export const FilmLookPresets: Record<string, FilmLookConfig> = {
     vignette: true,
     vignetteIntensity: 0.7,
   },
-  
   darkDrama: {
     contrast: 1.35,
     saturate: 0.85,
@@ -112,7 +99,6 @@ export const FilmLookPresets: Record<string, FilmLookConfig> = {
     vignette: true,
     vignetteIntensity: 0.8,
   },
-  
   vintage: {
     contrast: 1.1,
     saturate: 0.85,
@@ -123,7 +109,6 @@ export const FilmLookPresets: Record<string, FilmLookConfig> = {
     vignette: true,
     vignetteIntensity: 0.5,
   },
-  
   cyberpunk: {
     contrast: 1.3,
     saturate: 1.4,
@@ -134,7 +119,6 @@ export const FilmLookPresets: Record<string, FilmLookConfig> = {
     vignette: true,
     vignetteIntensity: 0.6,
   },
-  
   sunset: {
     contrast: 1.2,
     saturate: 1.25,
@@ -150,7 +134,7 @@ export const FilmLookPresets: Record<string, FilmLookConfig> = {
 export type FilmLookName = keyof typeof FilmLookPresets;
 
 // ═══════════════════════════════════════════════════════════════
-// Cinematic Presets (يطابق Python EffectsEngine)
+// Cinematic Presets
 // ═══════════════════════════════════════════════════════════════
 const CINEMATIC_PRESETS: Record<string, FilmLookConfig> = {
   cinematic_warm: {
@@ -210,9 +194,6 @@ const clamp = (value: number, min: number, max: number): number => {
   return Math.min(Math.max(value, min), max);
 };
 
-/**
- * بناء CSS filter string
- */
 const buildFilterString = (config: {
   contrast?: number;
   saturate?: number;
@@ -253,111 +234,86 @@ const buildFilterString = (config: {
   return filters.join(' ') || 'none';
 };
 
-/**
- * بناء tint background color
- */
-const buildTintColor = (
-  tint: TintColor,
-  opacity: number = 0.08,
-): string => {
-  // clamp values for safety
+const buildTintColor = (tint: TintColor, opacity: number = 0.08): string => {
   const r = clamp(Math.floor(tint.r * 128), 0, 255);
   const g = clamp(Math.floor(tint.g * 128), 0, 255);
   const b = clamp(Math.floor(tint.b * 128), 0, 255);
   const a = clamp(opacity, 0, 1);
-  
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 };
 
 // ═══════════════════════════════════════════════════════════════
-// Vignette Component
+// Vignette
 // ═══════════════════════════════════════════════════════════════
-interface VignetteProps {
-  intensity?: number;
-}
-
-const Vignette: React.FC<VignetteProps> = memo(({ intensity = 0.5 }) => {
-  const style = useMemo<React.CSSProperties>(
-    () => ({
-      background: `radial-gradient(
-        ellipse at center,
-        transparent 0%,
-        transparent 50%,
-        rgba(0, 0, 0, ${clamp(intensity, 0, 1)}) 100%
-      )`,
-      pointerEvents: 'none',
-      mixBlendMode: 'multiply' as const,
-    }),
-    [intensity],
-  );
-  
-  return <AbsoluteFill style={style} />;
-});
+const Vignette: React.FC<{ intensity?: number }> = memo(
+  ({ intensity = 0.5 }) => {
+    const style = useMemo<React.CSSProperties>(
+      () => ({
+        background: `radial-gradient(
+          ellipse at center,
+          transparent 0%,
+          transparent 50%,
+          rgba(0, 0, 0, ${clamp(intensity, 0, 1)}) 100%
+        )`,
+        pointerEvents: 'none',
+        mixBlendMode: 'multiply' as const,
+      }),
+      [intensity],
+    );
+    
+    return <AbsoluteFill style={style} />;
+  },
+);
 
 Vignette.displayName = 'Vignette';
 
 // ═══════════════════════════════════════════════════════════════
-// Film Grain Component
+// Film Grain
 // ═══════════════════════════════════════════════════════════════
-interface GrainProps {
-  intensity?: number;
-}
-
-const FilmGrain: React.FC<GrainProps> = memo(({ intensity = 0.04 }) => {
-  const style = useMemo<React.CSSProperties>(() => {
-    // SVG noise pattern (data URI)
-    const svgNoise = `data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='${clamp(
-      intensity * 10,
-      0,
-      1,
-    )}'/></svg>`;
+const FilmGrain: React.FC<{ intensity?: number }> = memo(
+  ({ intensity = 0.04 }) => {
+    const style = useMemo<React.CSSProperties>(() => {
+      const svgNoise = `data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='${clamp(intensity * 10, 0, 1)}'/></svg>`;
+      
+      return {
+        backgroundImage: `url("${svgNoise}")`,
+        backgroundSize: '200px 200px',
+        pointerEvents: 'none',
+        mixBlendMode: 'overlay' as const,
+        opacity: 0.5,
+      };
+    }, [intensity]);
     
-    return {
-      backgroundImage: `url("${svgNoise}")`,
-      backgroundSize: '200px 200px',
-      pointerEvents: 'none',
-      mixBlendMode: 'overlay' as const,
-      opacity: 0.5,
-    };
-  }, [intensity]);
-  
-  return <AbsoluteFill style={style} />;
-});
+    return <AbsoluteFill style={style} />;
+  },
+);
 
 FilmGrain.displayName = 'FilmGrain';
 
 // ═══════════════════════════════════════════════════════════════
-// 🎨 Main ColorGrade Component
+// Main ColorGrade
 // ═══════════════════════════════════════════════════════════════
 export const ColorGrade: React.FC<ColorGradeProps> = memo(
   ({ config, children, tintOpacity, blendMode = 'soft-light' }) => {
-    // إذا لا يوجد config أو معطّل
     if (!config || config.name === 'off') {
       return <>{children}</>;
     }
     
-    // جلب preset config (إن وُجد)
     const presetConfig = useMemo(
       () => CINEMATIC_PRESETS[config.name],
       [config.name],
     );
     
-    // بناء filter
     const filterString = useMemo(() => {
-      // استخدم filter المخصص إن وُجد
       if (config.filter && config.filter !== 'none') {
         return config.filter;
       }
-      
-      // وإلا، ابنِ من preset
       if (presetConfig) {
         return buildFilterString(presetConfig);
       }
-      
       return 'none';
     }, [config.filter, presetConfig]);
     
-    // بناء tint
     const tintBackground = useMemo(() => {
       const tint = config.tint || presetConfig?.tint;
       if (!tint) return null;
@@ -366,21 +322,17 @@ export const ColorGrade: React.FC<ColorGradeProps> = memo(
       return buildTintColor(tint, opacity);
     }, [config.tint, presetConfig, tintOpacity]);
     
-    // Vignette settings
     const showVignette = config.vignette ?? presetConfig?.vignette ?? false;
     const vignetteIntensity =
       config.vignetteIntensity ?? presetConfig?.vignetteIntensity ?? 0.5;
     
-    // Grain settings
     const showGrain = config.grain ?? false;
     const grainIntensity = config.grainIntensity ?? 0.04;
     
     return (
       <AbsoluteFill style={{ filter: filterString }}>
-        {/* Content */}
         {children}
         
-        {/* Color Tint */}
         {tintBackground && (
           <AbsoluteFill
             style={{
@@ -391,10 +343,7 @@ export const ColorGrade: React.FC<ColorGradeProps> = memo(
           />
         )}
         
-        {/* Vignette */}
         {showVignette && <Vignette intensity={vignetteIntensity} />}
-        
-        {/* Film Grain */}
         {showGrain && <FilmGrain intensity={grainIntensity} />}
       </AbsoluteFill>
     );
@@ -404,7 +353,7 @@ export const ColorGrade: React.FC<ColorGradeProps> = memo(
 ColorGrade.displayName = 'ColorGrade';
 
 // ═══════════════════════════════════════════════════════════════
-// 🎬 Cinematic Wrapper (للاستخدام السريع)
+// Cinematic Wrapper
 // ═══════════════════════════════════════════════════════════════
 export type CinematicPresetName =
   | 'warm'
@@ -453,7 +402,7 @@ export const CinematicWrapper: React.FC<CinematicWrapperProps> = memo(
 CinematicWrapper.displayName = 'CinematicWrapper';
 
 // ═══════════════════════════════════════════════════════════════
-// 🌈 Custom Color Grade (للتخصيص الكامل)
+// Custom Color Grade
 // ═══════════════════════════════════════════════════════════════
 export const CustomColorGrade: React.FC<CustomColorGradeProps> = memo(
   ({
@@ -518,7 +467,7 @@ export const CustomColorGrade: React.FC<CustomColorGradeProps> = memo(
 CustomColorGrade.displayName = 'CustomColorGrade';
 
 // ═══════════════════════════════════════════════════════════════
-// 🎞️ Film Look Wrapper (presets جاهزة)
+// Film Look Wrapper
 // ═══════════════════════════════════════════════════════════════
 interface FilmLookProps {
   preset: FilmLookName;
@@ -554,7 +503,4 @@ export const FilmLook: React.FC<FilmLookProps> = memo(
 
 FilmLook.displayName = 'FilmLook';
 
-// ═══════════════════════════════════════════════════════════════
-// Export
-// ═══════════════════════════════════════════════════════════════
 export default ColorGrade;
