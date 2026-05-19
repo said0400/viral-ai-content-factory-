@@ -1,9 +1,10 @@
 """
-🤖 Gemini Script Writer v2.0 (احتياطي)
+🤖 Gemini Script Writer v2.1 (احتياطي)
 ═══════════════════════════════════════════════════════════════
 يولّد سكربتات عربية باستخدام Google Gemini AI
 
-التحسينات في v2.0:
+التحسينات في v2.1:
+  ✓ تحديث الموديلات للأحدث (gemini-2.0-flash)
   ✓ Timeout management
   ✓ Rate limiting
   ✓ Usage tracking
@@ -58,15 +59,24 @@ ContentType = Literal["motivational", "educational", "story", "quote"]
 
 
 class GeminiModel(str, Enum):
-    """الموديلات المتاحة من Gemini."""
-    FLASH = "gemini-1.5-flash"
-    FLASH_8B = "gemini-1.5-flash-8b"
-    PRO = "gemini-1.5-pro"
+    """الموديلات المتاحة من Gemini (محدّثة 2025)."""
+    # ✅ FIXED: الموديلات الجديدة
+    FLASH_2 = "gemini-2.0-flash"
+    FLASH_LITE_2 = "gemini-2.0-flash-lite"
+    FLASH_EXP = "gemini-2.0-flash-exp"
+    PRO_15 = "gemini-1.5-pro-latest"  # احتياطي
+    FLASH_15 = "gemini-1.5-flash-latest"  # احتياطي
     
     @classmethod
     def fallback_chain(cls) -> list["GeminiModel"]:
-        """سلسلة الـ fallback مرتبة."""
-        return [cls.FLASH, cls.FLASH_8B, cls.PRO]
+        """سلسلة الـ fallback مرتبة (الأحدث أولاً)."""
+        return [
+            cls.FLASH_2,        # ⭐ الأفضل والأسرع
+            cls.FLASH_LITE_2,   # سريع
+            cls.FLASH_EXP,      # تجريبي
+            cls.FLASH_15,       # احتياطي
+            cls.PRO_15,         # احتياطي أخير
+        ]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -173,7 +183,7 @@ class GeminiConstants:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Mood Constants (يجب نقلها لملف منفصل لاحقاً)
+# Mood Constants
 # ═══════════════════════════════════════════════════════════════════
 MOOD_KEYWORDS: dict[str, tuple[str, ...]] = {
     "motivation": (
@@ -450,7 +460,10 @@ class GeminiWriter:
         last_error = None
         fallback_chain = GeminiModel.fallback_chain()
         
-        for attempt in range(1, GeminiConstants.MAX_RETRIES + 1):
+        # ✅ MAX_RETRIES أصبح يساوي عدد الموديلات المتاحة
+        max_attempts = min(GeminiConstants.MAX_RETRIES, len(fallback_chain))
+        
+        for attempt in range(1, max_attempts + 1):
             # rate limiting
             self.rate_limiter.wait_if_needed()
             
@@ -465,7 +478,7 @@ class GeminiWriter:
             model_name = fallback_chain[model_idx].value
             
             logger.info(
-                f"🤖 [Gemini {attempt}/{GeminiConstants.MAX_RETRIES}] "
+                f"🤖 [Gemini {attempt}/{max_attempts}] "
                 f"{model_name} | temp={temp}"
             )
             
@@ -502,7 +515,7 @@ class GeminiWriter:
                 self.stats.record_failure()
                 logger.warning(f"⚠ فشلت محاولة {attempt}: {type(e).__name__}: {e}")
                 
-                if attempt < GeminiConstants.MAX_RETRIES:
+                if attempt < max_attempts:
                     sleep_time = GeminiConstants.RETRY_DELAY_BASE * attempt
                     logger.debug(f"   انتظار {sleep_time}s...")
                     time.sleep(sleep_time)
@@ -794,7 +807,7 @@ if __name__ == "__main__":
     )
     
     print("=" * 60)
-    print("🧪 Testing GeminiWriter v2.0 (DRY RUN)")
+    print("🧪 Testing GeminiWriter v2.1 (DRY RUN)")
     print("=" * 60)
     
     # اختبار dry run (بدون API)
