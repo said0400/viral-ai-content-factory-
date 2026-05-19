@@ -1,5 +1,5 @@
 /**
- * 🎬 Scene Renderer v2.0 — Pro
+ * 🎬 Scene Renderer v2.1 — Pro
  * ═══════════════════════════════════════════════════════════════
  * عرض مشهد واحد مع كل تأثيراته:
  *   ✓ BackgroundVideo (مع zoom & shake)
@@ -7,22 +7,92 @@
  *   ✓ Scene-specific effects (Hook, Peak, CTA, etc.)
  *   ✓ Transition support
  *   ✓ Performance optimized
+ *
+ * التحسينات v2.1:
+ *   ✓ FIXED: Relative imports (no @types alias)
+ *   ✓ FIXED: Import React for memo compatibility
+ *   ✓ Type definitions inline
  * ═══════════════════════════════════════════════════════════════
  */
 
-import { useMemo, memo, ReactNode } from 'react';
+import React, { useMemo, memo, ReactNode } from 'react';
 import {
   AbsoluteFill,
   useCurrentFrame,
   useVideoConfig,
   interpolate,
 } from 'remotion';
+
+// ✅ FIXED: Relative imports (لا @types/index)
 import { BackgroundVideo } from './BackgroundVideo';
 import { ColorGrade } from './ColorGrade';
-import type { Scene, Effects } from '@types/index';
 
 // ═══════════════════════════════════════════════════════════════
-// Types
+// Types (inline - لا حاجة لـ @types/index)
+// ═══════════════════════════════════════════════════════════════
+
+/** نوع المشهد */
+type SceneType =
+  | 'hook'
+  | 'intro'
+  | 'build'
+  | 'main'
+  | 'peak'
+  | 'resolution'
+  | 'cta'
+  | 'outro';
+
+/** نوع الزوم */
+type ZoomType =
+  | 'slow_zoom_in'
+  | 'slow_zoom_out'
+  | 'punch_zoom'
+  | 'drift_right'
+  | 'drift_left'
+  | 'drift_up'
+  | 'drift_down'
+  | 'static';
+
+/** Scene interface */
+interface Scene {
+  id: number;
+  type: SceneType;
+  text: string;
+  duration: number;
+  pauseAfter: number;
+  startTime: number;
+  endTime: number;
+  totalLength: number;
+  backgroundPath: string;
+  zoomEffect: ZoomType;
+  transitionIn?: string;
+  shake: boolean;
+  visualPrompt?: string;
+  energy?: number;
+  voiceTone?: string;
+  effectsConfig?: any;
+}
+
+/** Grade config */
+interface GradeConfig {
+  name: string;
+  filter?: string;
+  tint?: { r: number; g: number; b: number };
+  vignette?: boolean;
+  vignetteIntensity?: number;
+  grain?: boolean;
+  grainIntensity?: number;
+}
+
+/** Effects */
+interface Effects {
+  grade?: GradeConfig;
+  letterbox?: any;
+  fade?: any;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Component Types
 // ═══════════════════════════════════════════════════════════════
 export interface SceneRendererProps {
   scene: Scene;
