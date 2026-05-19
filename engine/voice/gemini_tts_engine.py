@@ -1,3 +1,4 @@
+"""
 🎙️ Gemini TTS Engine v4.1 — Rate Limit Friendly
 ═══════════════════════════════════════════════════════════════
 الإستراتيجية:
@@ -181,7 +182,7 @@ class GeminiTTSStats:
     successful_scenes: int = 0
     failed_scenes: int = 0
     cached_scenes: int = 0
-    rate_limit_hits: int = 0  # ✅ NEW
+    rate_limit_hits: int = 0
     total_chars: int = 0
     total_time: float = 0.0
     
@@ -205,34 +206,28 @@ class GeminiTTSStats:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Constants (Updated for Rate Limit)
+# Constants
 # ═══════════════════════════════════════════════════════════════════
 class GeminiTTSConstants:
-    """ثوابت Gemini TTS (محدّثة 2026 - Rate Limit Friendly)."""
+    """ثوابت Gemini TTS."""
     
-    # ✅ Model الحديث 2026
     MODEL_NAME = "gemini-2.5-flash-preview-tts"
     
     DEFAULT_VOICE = "Achird"
     DEFAULT_STYLE = "motivational"
     DEFAULT_TEMPERATURE = 1.0
     
-    # ✅ FIXED: زيادة المحاولات والوقت
-    MAX_RETRIES = 3  # كان 2
-    RETRY_DELAY = 6  # كان 2
-    RETRY_DELAY_RATE_LIMIT = 12  # ✅ NEW: للـ 429 errors
+    MAX_RETRIES = 3
+    RETRY_DELAY = 6
+    RETRY_DELAY_RATE_LIMIT = 12
     
-    MIN_AUDIO_SIZE = 500  # bytes
+    MIN_AUDIO_SIZE = 500
     SCENE_TEXT_MIN_CHARS = 50
     SCENE_TEXT_MAX_CHARS = 200
     
-    # ✅ FIXED: تقليل الـ parallel لتجنب 429
-    PARALLEL_SCENES_DEFAULT = 1  # كان 3
+    PARALLEL_SCENES_DEFAULT = 1
+    INTER_REQUEST_DELAY = 4.5
     
-    # ✅ NEW: Delay بين الطلبات (Free Tier = 15 req/min = 4s/req)
-    INTER_REQUEST_DELAY = 4.5  # ثواني
-    
-    # ✅ NEW: Rate limit detection
     RATE_LIMIT_KEYWORDS = (
         "429",
         "RESOURCE_EXHAUSTED",
@@ -262,24 +257,12 @@ class GeminiTTSEngine(BaseTTS):
         parallel_scenes: int = GeminiTTSConstants.PARALLEL_SCENES_DEFAULT,
         inter_request_delay: float = GeminiTTSConstants.INTER_REQUEST_DELAY,
     ):
-        """
-        Args:
-            api_key: مفتاح Gemini API
-            voice: الصوت الافتراضي
-            style: الـ style الافتراضي
-            temperature: درجة العشوائية
-            cache_enabled: تفعيل الكاش (موفّر API calls!)
-            parallel_scenes: عدد المشاهد المتوازية (1 = sequential = آمن)
-            inter_request_delay: ثواني بين كل طلب (4.5s للـ free tier)
-        """
         super().__init__(cache_enabled=cache_enabled)
         
-        # API Key
         self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
         if not self.api_key:
             raise RuntimeError("❌ GEMINI_API_KEY غير موجود!")
         
-        # إعدادات
         self.voice_name = self._validate_voice(
             voice or os.getenv("GEMINI_VOICE", GeminiTTSConstants.DEFAULT_VOICE)
         )
@@ -294,7 +277,6 @@ class GeminiTTSEngine(BaseTTS):
             os.getenv("GEMINI_MAX_RETRIES", GeminiTTSConstants.MAX_RETRIES)
         )
         
-        # ✅ Override من env إذا موجود
         self.parallel_scenes = int(
             os.getenv("GEMINI_PARALLEL_SCENES", parallel_scenes)
         )
@@ -302,17 +284,14 @@ class GeminiTTSEngine(BaseTTS):
             os.getenv("GEMINI_INTER_DELAY", inter_request_delay)
         )
         
-        # Stats
         self.stats = GeminiTTSStats()
         self._stats_lock = Lock()
-        self._last_request_time = 0.0  # ✅ NEW: تتبع آخر طلب
+        self._last_request_time = 0.0
         self._request_lock = Lock()
         
-        # Pre-import للمكتبات (أسرع)
         self._init_libs()
         self._init_client()
         
-        # ✅ Mode info
         mode = "Sequential (Rate-Limit Safe)" if self.parallel_scenes == 1 else f"Parallel ({self.parallel_scenes})"
         
         logger.info(
@@ -325,9 +304,6 @@ class GeminiTTSEngine(BaseTTS):
                 f"   ⏱  Inter-request delay: {self.inter_request_delay}s"
             )
     
-    # ═══════════════════════════════════════════════════════════════
-    # Initialization
-    # ═══════════════════════════════════════════════════════════════
     def _validate_voice(self, voice: str) -> str:
         if voice not in GEMINI_VOICES:
             logger.warning(
@@ -347,7 +323,6 @@ class GeminiTTSEngine(BaseTTS):
         return style
     
     def _init_libs(self) -> None:
-        """تحميل المكتبات مسبقاً."""
         try:
             from google import genai
             from google.genai import types
@@ -362,17 +337,12 @@ class GeminiTTSEngine(BaseTTS):
             )
     
     def _init_client(self) -> None:
-        """تهيئة Gemini client."""
         try:
             self._client = self._genai.Client(api_key=self.api_key)
         except Exception as e:
             raise RuntimeError(f"❌ فشل تهيئة Gemini: {e}")
     
-    # ═══════════════════════════════════════════════════════════════
-    # Rate Limit Helper (NEW)
-    # ═══════════════════════════════════════════════════════════════
     def _is_rate_limit_error(self, error: Exception) -> bool:
-        """فحص إذا كان الـ error بسبب rate limit."""
         error_str = str(error).lower()
         return any(
             kw.lower() in error_str
@@ -380,7 +350,6 @@ class GeminiTTSEngine(BaseTTS):
         )
     
     def _wait_for_rate_limit(self) -> None:
-        """انتظر قبل الطلب التالي."""
         with self._request_lock:
             now = time.time()
             time_since_last = now - self._last_request_time
@@ -392,24 +361,15 @@ class GeminiTTSEngine(BaseTTS):
             
             self._last_request_time = time.time()
     
-    # ═══════════════════════════════════════════════════════════════
-    # Voice Selection (Override)
-    # ═══════════════════════════════════════════════════════════════
     def _select_voice_for_mood(self, mood: str) -> str:
-        """اختيار الصوت حسب المزاج."""
         return MOOD_VOICE_MAP.get(mood, self.voice_name)
     
     def _select_style_for_mood(self, mood: str) -> str:
-        """اختيار الـ style حسب المزاج."""
         return MOOD_STYLE_MAP.get(mood, self.style_preset)
     
     def _select_style_for_tone(self, voice_tone: str) -> Optional[str]:
-        """اختيار style خاص للنبرة."""
         return TONE_TO_STYLE.get(voice_tone)
     
-    # ═══════════════════════════════════════════════════════════════
-    # Main API (Override)
-    # ═══════════════════════════════════════════════════════════════
     def generate_audio(
         self,
         script: dict,
@@ -418,16 +378,13 @@ class GeminiTTSEngine(BaseTTS):
         style: Optional[str] = None,
         progress_callback: Optional[Callable[[float, str], None]] = None,
     ) -> TTSResult:
-        """توليد الصوت مشهد بمشهد."""
         start_time = time.time()
         self._ensure_output_dir(output_path)
         
-        # الإعدادات
         mood = script.get("music_mood", "motivation")
         voice_name = voice or self._select_voice_for_mood(mood)
         style_preset = style or self._select_style_for_mood(mood)
         
-        # استخراج المشاهد
         scenes_data = self._get_scenes_data(script)
         
         if not scenes_data:
@@ -440,7 +397,6 @@ class GeminiTTSEngine(BaseTTS):
         
         total_chars = sum(len(s["text"]) for s in scenes_data)
         
-        # ✅ تقدير الوقت المتوقع
         if self.parallel_scenes == 1:
             estimated_time = len(scenes_data) * (self.inter_request_delay + 2)
             logger.info(
@@ -461,7 +417,6 @@ class GeminiTTSEngine(BaseTTS):
         if progress_callback:
             progress_callback(0.05, f"إعداد {len(scenes_data)} مشهد")
         
-        # توليد المشاهد
         temp_dir = Path(tempfile.mkdtemp(prefix="gemini_tts_"))
         
         try:
@@ -481,13 +436,11 @@ class GeminiTTSEngine(BaseTTS):
                     error="All scenes failed",
                 )
             
-            # دمج
             if progress_callback:
                 progress_callback(0.9, "دمج الملفات...")
             
             self._merge_wav_files(wav_files, output_path)
             
-            # النتيجة
             elapsed = time.time() - start_time
             with self._stats_lock:
                 self.stats.total_time += elapsed
@@ -502,7 +455,6 @@ class GeminiTTSEngine(BaseTTS):
                 f"({file_size / 1024:.1f} KB) في {elapsed:.1f}s"
             )
             
-            # ✅ تحذير إذا فشلت بعض المشاهد
             if len(wav_files) < len(scenes_data):
                 failed_count = len(scenes_data) - len(wav_files)
                 logger.warning(
@@ -527,11 +479,7 @@ class GeminiTTSEngine(BaseTTS):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
     
-    # ═══════════════════════════════════════════════════════════════
-    # Scene Extraction
-    # ═══════════════════════════════════════════════════════════════
     def _get_scenes_data(self, script: dict) -> list[dict]:
-        """استخراج بيانات المشاهد (نص + tone)."""
         scenes = script.get("scenes", [])
         
         if scenes:
@@ -549,7 +497,6 @@ class GeminiTTSEngine(BaseTTS):
                 logger.info(f"   📝 {len(data)} مشاهد من scenes")
                 return data
         
-        # Fallback: full_text
         full_text = script.get("full_text", "").strip()
         if full_text and len(full_text) > GeminiTTSConstants.SCENE_TEXT_MIN_CHARS:
             chunks = self._split_text(
@@ -562,7 +509,6 @@ class GeminiTTSEngine(BaseTTS):
                 for i, c in enumerate(chunks)
             ]
         
-        # Last resort: hook
         hook = script.get("hook", "").strip()
         if hook:
             logger.warning(f"   ⚠ Hook فقط")
@@ -570,9 +516,6 @@ class GeminiTTSEngine(BaseTTS):
         
         return []
     
-    # ═══════════════════════════════════════════════════════════════
-    # Scene Generation (Sequential or Parallel)
-    # ═══════════════════════════════════════════════════════════════
     def _generate_scenes(
         self,
         scenes_data: list[dict],
@@ -581,15 +524,12 @@ class GeminiTTSEngine(BaseTTS):
         temp_dir: Path,
         progress_callback: Optional[Callable] = None,
     ) -> list[str]:
-        """توليد المشاهد - sequential أو parallel."""
-        # ✅ Sequential mode (للـ free tier)
         if self.parallel_scenes <= 1:
             return self._generate_scenes_sequential(
                 scenes_data, voice_name, default_style,
                 temp_dir, progress_callback,
             )
         
-        # Parallel mode (للـ paid tier)
         return self._generate_scenes_parallel(
             scenes_data, voice_name, default_style,
             temp_dir, progress_callback,
@@ -603,13 +543,11 @@ class GeminiTTSEngine(BaseTTS):
         temp_dir: Path,
         progress_callback: Optional[Callable] = None,
     ) -> list[str]:
-        """توليد المشاهد بشكل تسلسلي (آمن من rate limit)."""
         results: list[Optional[str]] = []
         total = len(scenes_data)
         
         for i, scene_data in enumerate(scenes_data):
             try:
-                # ✅ انتظر قبل كل طلب (إلا الأول)
                 if i > 0:
                     self._wait_for_rate_limit()
                 
@@ -626,7 +564,6 @@ class GeminiTTSEngine(BaseTTS):
                 logger.error(f"   ❌ مشهد {i + 1}: {e}")
                 results.append(None)
             
-            # Progress
             completed = i + 1
             if progress_callback:
                 progress = 0.1 + (completed / total) * 0.75
@@ -635,7 +572,6 @@ class GeminiTTSEngine(BaseTTS):
                     f"مشهد {completed}/{total}"
                 )
         
-        # فلترة الـ None
         return [r for r in results if r is not None]
     
     def _generate_scenes_parallel(
@@ -646,7 +582,6 @@ class GeminiTTSEngine(BaseTTS):
         temp_dir: Path,
         progress_callback: Optional[Callable] = None,
     ) -> list[str]:
-        """توليد المشاهد بشكل متوازٍ (للـ paid tier)."""
         results: dict[int, Optional[str]] = {}
         completed_count = 0
         total = len(scenes_data)
@@ -681,7 +616,6 @@ class GeminiTTSEngine(BaseTTS):
                         f"مشهد {completed_count}/{total}"
                     )
         
-        # إعادة الترتيب
         ordered = [results[i] for i in range(total) if results.get(i)]
         return ordered
     
@@ -693,19 +627,15 @@ class GeminiTTSEngine(BaseTTS):
         default_style: str,
         temp_dir: Path,
     ) -> Optional[str]:
-        """توليد مشهد واحد مع caching و retry."""
         text = scene_data["text"]
         voice_tone = scene_data.get("voice_tone", "intense")
         
-        # اختيار style حسب tone
         style_for_tone = self._select_style_for_tone(voice_tone)
         actual_style = style_for_tone or default_style
         
-        # تحقق من الكاش
         if self.cache_enabled:
             cached = self._get_cached(text, voice_name, actual_style)
             if cached:
-                # نسخ للـ temp_dir
                 dest = temp_dir / f"scene_{scene_index:03d}.wav"
                 shutil.copy(cached, dest)
                 
@@ -726,14 +656,12 @@ class GeminiTTSEngine(BaseTTS):
             f"{text[:40]}..."
         )
         
-        # توليد مع retry
         chunk_wav = str(temp_dir / f"scene_{scene_index:03d}.wav")
         last_error = None
         
         for attempt in range(1, self.max_retries + 1):
             try:
                 if attempt > 1:
-                    # ✅ Smart delay: أطول للـ rate limit
                     delay = (
                         GeminiTTSConstants.RETRY_DELAY_RATE_LIMIT
                         if last_error and self._is_rate_limit_error(last_error)
@@ -750,7 +678,6 @@ class GeminiTTSEngine(BaseTTS):
                     with open(chunk_wav, "wb") as f:
                         f.write(audio_data)
                     
-                    # حفظ في الكاش
                     if self.cache_enabled:
                         self._save_to_cache(
                             chunk_wav, text, voice_name, actual_style
@@ -766,7 +693,6 @@ class GeminiTTSEngine(BaseTTS):
             except Exception as e:
                 last_error = e
                 
-                # ✅ Detect rate limit
                 if self._is_rate_limit_error(e):
                     with self._stats_lock:
                         self.stats.rate_limit_hits += 1
@@ -780,23 +706,18 @@ class GeminiTTSEngine(BaseTTS):
                         f"محاولة {attempt}: {str(e)[:80]}"
                     )
         
-        # فشل
         with self._stats_lock:
             self.stats.total_scenes += 1
             self.stats.failed_scenes += 1
         
         return None
     
-    # ═══════════════════════════════════════════════════════════════
-    # Gemini API Call
-    # ═══════════════════════════════════════════════════════════════
     def _call_gemini_api(
         self,
         text: str,
         voice_name: str,
         style_preset: str,
     ) -> bytes:
-        """استدعاء Gemini API."""
         style_config = STYLE_PRESETS.get(
             style_preset, STYLE_PRESETS["motivational"]
         )
@@ -848,7 +769,6 @@ class GeminiTTSEngine(BaseTTS):
         
         raw_audio = b"".join(audio_chunks)
         
-        # تحويل لـ WAV
         ext = mimetypes.guess_extension(mime_type) if mime_type else None
         if ext is None or "wav" not in (ext or ""):
             raw_audio = self._convert_to_wav(raw_audio, mime_type)
@@ -856,7 +776,6 @@ class GeminiTTSEngine(BaseTTS):
         return raw_audio
 
     def _build_prompt(self, text: str, style: StylePreset) -> str:
-        """بناء الـ prompt وتضمين الملاحظات الإخراجية للأسلوب."""
         return (
             f"[Voice Profile: {style.audio_profile}]\n"
             f"[Director's Note: {style.directors_note}]\n"
@@ -865,7 +784,6 @@ class GeminiTTSEngine(BaseTTS):
         )
 
     def _convert_to_wav(self, raw_audio: bytes, mime_type: Optional[str]) -> bytes:
-        """تحويل البيانات الصوتية المستلمة إلى WAV متوافق باستخدام pydub."""
         try:
             format_ext = "mp3" if mime_type and "mp3" in mime_type else "ogg"
             with tempfile.NamedTemporaryFile(suffix=f".{format_ext}", delete=False) as f:
@@ -887,13 +805,11 @@ class GeminiTTSEngine(BaseTTS):
             return raw_audio
 
     def _ensure_output_dir(self, output_path: str) -> None:
-        """التأكد من وجود المجلد الهدف."""
         parent = Path(output_path).parent
         if parent:
             parent.mkdir(parents=True, exist_ok=True)
 
     def _silence_result(self, output_path: str, error_msg: str) -> TTSResult:
-        """دالة للتعافي السريع وإنشاء ملف فارغ/صامت عند حدوث خطأ فادح."""
         return TTSResult(
             status=TTSStatus.FAILED,
             output_path=output_path,
@@ -901,15 +817,11 @@ class GeminiTTSEngine(BaseTTS):
             error=error_msg
         )
     
-    # ═══════════════════════════════════════════════════════════════
-    # WAV Merging
-    # ═══════════════════════════════════════════════════════════════
     def _merge_wav_files(
         self,
         wav_files: list[str],
         output_path: str,
     ) -> None:
-        """دمج ملفات WAV."""
         if not wav_files:
             raise RuntimeError("لا توجد ملفات للدمج")
         
@@ -920,7 +832,6 @@ class GeminiTTSEngine(BaseTTS):
                 segment = self._AudioSegment.from_wav(wav_file)
                 combined += segment
             
-            # Export حسب الامتداد
             if output_path.endswith(".mp3"):
                 combined.export(
                     output_path,
@@ -934,14 +845,9 @@ class GeminiTTSEngine(BaseTTS):
             
         except Exception as e:
             logger.error(f"   ❌ فشل الدمج: {e}")
-            # Fallback: نسخ الأول
             shutil.copy(wav_files[0], output_path)
     
-    # ═══════════════════════════════════════════════════════════════
-    # Text Splitting
-    # ═══════════════════════════════════════════════════════════════
     def _split_text(self, text: str, max_chars: int) -> list[str]:
-        """تقسيم النص."""
         if len(text) <= max_chars:
             return [text]
         
