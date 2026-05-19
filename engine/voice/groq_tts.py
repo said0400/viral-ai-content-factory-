@@ -131,7 +131,7 @@ class GroqTTSStats:
 class GroqTTSConstants:
     """ثوابت Groq TTS."""
     
-    ARABIC_MODEL = "canopylabs/orpheus-arabic-saudi"
+    ARABIC_MODEL = "playai-tts-arabic"
     
     MAX_CHARS = 190  # حد الموديل 200، نترك هامش
     
