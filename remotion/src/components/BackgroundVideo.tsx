@@ -1,18 +1,14 @@
 /**
- * 🎬 Background Video Component v2.0
+ * 🎬 Background Video Component v2.2
  * ═══════════════════════════════════════════════════════════════
- * عرض فيديو الخلفية مع:
- *   ✓ 8 أنواع zoom effects
- *   ✓ Shake effect
- *   ✓ Filters (blur, brightness, etc.)
- *   ✓ Custom overlay
- *   ✓ Performance optimized
- *   ✓ Smart fallback
- *   ✓ staticFile() support
+ * إصلاحات v2.2:
+ *   ✓ FIXED: مشكلة /public/ في المسارات (نهائي)
+ *   ✓ FIXED: import React مضاف
+ *   ✓ تنظيف عميق لأي مسار قبل staticFile()
  * ═══════════════════════════════════════════════════════════════
  */
 
-import { useMemo, memo } from 'react';
+import React, { useMemo, memo } from 'react';
 import {
   AbsoluteFill,
   OffthreadVideo,
@@ -37,41 +33,18 @@ export type ZoomType =
   | 'static';
 
 export interface BackgroundVideoProps {
-  /** مسار الفيديو */
   src: string;
-  
-  /** المدة بالـ frames */
   duration: number;
-  
-  /** نوع الزوم */
   zoomEffect?: ZoomType;
-  
-  /** تفعيل الاهتزاز */
   shake?: boolean;
-  
-  /** شدة الاهتزاز */
   shakeIntensity?: number;
-  
-  /** أبعاد الفيديو */
   width: number;
   height: number;
-  
-  /** لون الـ overlay */
   overlayColor?: string;
-  
-  /** opacity الـ overlay */
   overlayOpacity?: number;
-  
-  /** CSS filters (blur, brightness, etc.) */
   filter?: string;
-  
-  /** بداية الفيديو الأصلي */
   startFrom?: number;
-  
-  /** سرعة التشغيل */
   playbackRate?: number;
-  
-  /** Object position */
   objectPosition?: string;
 }
 
@@ -83,45 +56,55 @@ const DEFAULT_OVERLAY_OPACITY = 0.25;
 const DEFAULT_SHAKE_INTENSITY = 2.0;
 
 // ═══════════════════════════════════════════════════════════════
-// Helpers
+// ✅ FIXED: resolveVideoPath v3 (حل نهائي للـ /public/)
 // ═══════════════════════════════════════════════════════════════
 const resolveVideoPath = (src: string): string => {
   if (!src) return '';
   
-  // URLs خارجية
+  // URLs خارجية - استخدمها مباشرة
   if (src.startsWith('http://') || src.startsWith('https://')) {
     return src;
   }
   
-  // file:// protocol
   if (src.startsWith('file://')) {
     return src;
   }
   
-  // إذا يحتوي /public/ احذفه (staticFile يضيفه تلقائياً)
+  // ✅ تنظيف عميق وشامل
   let cleanSrc = src;
-  if (cleanSrc.startsWith('/public/')) {
-    cleanSrc = cleanSrc.substring(8);  // احذف "/public/"
-  } else if (cleanSrc.startsWith('public/')) {
-    cleanSrc = cleanSrc.substring(7);  // احذف "public/"
+  
+  // 1. احذف أي مسار مطلق حتى /public/
+  //    مثل: /home/runner/.../remotion/public/footage/xxx.mp4
+  const publicMatch = cleanSrc.match(/[/\\]public[/\\](.+)$/);
+  if (publicMatch) {
+    cleanSrc = publicMatch[1];
   }
   
-  // إذا مطلق (يبدأ بـ /)
-  if (cleanSrc.startsWith('/')) {
-    cleanSrc = cleanSrc.substring(1);  // احذف الـ "/" الأولى
+  // 2. احذف "public/" في البداية (بكل أشكاله)
+  cleanSrc = cleanSrc.replace(/^\/?(public\/)+/gi, '');
+  
+  // 3. احذف "/" في البداية
+  cleanSrc = cleanSrc.replace(/^\/+/, '');
+  
+  // 4. تأكد من عدم وجود مسار مطلق
+  if (cleanSrc.includes(':\\') || cleanSrc.startsWith('/home/') || cleanSrc.startsWith('/tmp/')) {
+    // مسار مطلق - ابحث عن اسم الملف فقط
+    const parts = cleanSrc.split(/[/\\]/);
+    const filename = parts[parts.length - 1];
+    cleanSrc = `footage/${filename}`;
   }
   
+  // ✅ staticFile يضيف /public/ تلقائياً
+  // فقط نمرر المسار النسبي بدون /public/
   return staticFile(cleanSrc);
 };
+
 interface Transform {
   scale: number;
   x: number;
   y: number;
 }
 
-/**
- * حساب transform للزوم
- */
 const calculateZoom = (
   zoomType: ZoomType,
   frame: number,
@@ -202,9 +185,6 @@ const calculateZoom = (
   }
 };
 
-/**
- * حساب shake effect
- */
 const calculateShake = (
   frame: number,
   fps: number,
@@ -217,7 +197,7 @@ const calculateShake = (
 };
 
 // ═══════════════════════════════════════════════════════════════
-// Main Component (memoized)
+// Main Component
 // ═══════════════════════════════════════════════════════════════
 export const BackgroundVideo: React.FC<BackgroundVideoProps> = memo(
   ({
@@ -238,15 +218,12 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = memo(
     const frame = useCurrentFrame();
     const { fps, durationInFrames } = useVideoConfig();
 
-    // ─── Fallback إذا لا يوجد src ─────────────────────────────
     if (!src) {
       return <FallbackBackground width={width} height={height} />;
     }
 
-    // ─── Resolved Path (memoized) ─────────────────────────────
     const videoSrc = useMemo(() => resolveVideoPath(src), [src]);
 
-    // ─── Transforms (memoized per frame range) ────────────────
     const zoomTransform = useMemo(
       () => calculateZoom(zoomEffect, frame, durationInFrames),
       [zoomEffect, frame, durationInFrames],
@@ -260,7 +237,6 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = memo(
       [shake, frame, fps, shakeIntensity],
     );
 
-    // ─── Combined Transform String ────────────────────────────
     const combinedTransform = useMemo(
       () => `
         scale(${zoomTransform.scale})
@@ -271,10 +247,8 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = memo(
       [zoomTransform, shakeTransform],
     );
 
-    // ─── Overlay Style ────────────────────────────────────────
     const overlayStyle = useMemo<React.CSSProperties>(
       () => ({
-        // تحويل rgba لتطبيق opacity
         backgroundColor: overlayColor.replace(
           /rgba?\(([^)]+)\)/,
           (_, values) => {
@@ -282,7 +256,6 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = memo(
             if (parts.length === 3) {
               return `rgba(${parts.join(',')}, ${overlayOpacity})`;
             }
-            // إذا rgba موجود، استبدل الـ alpha
             if (parts.length === 4) {
               parts[3] = overlayOpacity.toString();
               return `rgba(${parts.join(',')})`;
@@ -295,7 +268,6 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = memo(
       [overlayColor, overlayOpacity],
     );
 
-    // ─── Video Container Style ────────────────────────────────
     const videoContainerStyle = useMemo<React.CSSProperties>(
       () => ({
         width: '100%',
@@ -308,7 +280,6 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = memo(
       [combinedTransform, filter],
     );
 
-    // ─── Video Element Style ──────────────────────────────────
     const videoElementStyle = useMemo<React.CSSProperties>(
       () => ({
         width: '100%',
@@ -326,7 +297,6 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = memo(
           backgroundColor: '#000000',
         }}
       >
-        {/* Video with transforms */}
         <div style={videoContainerStyle}>
           <Loop durationInFrames={durationInFrames}>
             <OffthreadVideo
@@ -340,7 +310,6 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = memo(
           </Loop>
         </div>
 
-        {/* Overlay */}
         <AbsoluteFill style={overlayStyle} />
       </AbsoluteFill>
     );
@@ -350,7 +319,7 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = memo(
 BackgroundVideo.displayName = 'BackgroundVideo';
 
 // ═══════════════════════════════════════════════════════════════
-// 🎨 Fallback Background (Enhanced)
+// Fallback Background
 // ═══════════════════════════════════════════════════════════════
 interface FallbackBackgroundProps {
   width: number;
@@ -371,7 +340,6 @@ const FallbackBackground: React.FC<FallbackBackgroundProps> = memo(
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
 
-    // Animated gradient (slow rotation)
     const hueRotate = useMemo(
       () =>
         interpolate(frame, [0, 300], [0, 30], {
@@ -380,16 +348,14 @@ const FallbackBackground: React.FC<FallbackBackgroundProps> = memo(
       [frame],
     );
 
-    // Pulse effect على الـ radial
     const pulse = useMemo(
       () => {
         const time = frame / fps;
-        return Math.sin(time * 0.5) * 0.05 + 0.05; // 0.0 - 0.1
+        return Math.sin(time * 0.5) * 0.05 + 0.05;
       },
       [frame, fps],
     );
 
-    // Slow parallax movement
     const offset = useMemo(
       () => {
         const time = frame / fps;
@@ -413,7 +379,6 @@ const FallbackBackground: React.FC<FallbackBackgroundProps> = memo(
           overflow: 'hidden',
         }}
       >
-        {/* Animated radial gradient */}
         <AbsoluteFill
           style={{
             backgroundImage: `radial-gradient(
@@ -424,7 +389,6 @@ const FallbackBackground: React.FC<FallbackBackgroundProps> = memo(
           }}
         />
 
-        {/* Subtle noise overlay */}
         <AbsoluteFill
           style={{
             backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E")`,
@@ -439,7 +403,7 @@ const FallbackBackground: React.FC<FallbackBackgroundProps> = memo(
 FallbackBackground.displayName = 'FallbackBackground';
 
 // ═══════════════════════════════════════════════════════════════
-// 🎬 Multi-Video Background (للمونتاج المتقدم)
+// Multi-Video Background
 // ═══════════════════════════════════════════════════════════════
 export interface VideoSegment {
   src: string;
@@ -461,7 +425,6 @@ export const MultiBackgroundVideo: React.FC<MultiBackgroundVideoProps> = memo(
   ({ segments, width, height, overlayColor, overlayOpacity }) => {
     const frame = useCurrentFrame();
     
-    // العثور على الـ segment الحالي
     const currentSegment = useMemo(() => {
       return segments.find(
         (s) =>
@@ -491,7 +454,4 @@ export const MultiBackgroundVideo: React.FC<MultiBackgroundVideoProps> = memo(
 
 MultiBackgroundVideo.displayName = 'MultiBackgroundVideo';
 
-// ═══════════════════════════════════════════════════════════════
-// Default Export
-// ═══════════════════════════════════════════════════════════════
 export default BackgroundVideo;
