@@ -1,17 +1,18 @@
 """
-🎙️ Groq TTS Engine v2.0 — Pro
+🎙️ Groq TTS Engine v2.1 — Pro
 ═══════════════════════════════════════════════════════════════
-الموديل: canopylabs/orpheus-arabic-saudi
-الأصوات: fahad, sultan, noura, lulwa
+الموديل: playai-tts-arabic (الأحدث - 2024)
+الأصوات: Ahmad, Amira, Khalid, Nasser (عربية احترافية)
 
 ⚠️ حد المحرك: 200 حرف لكل طلب (نقسم تلقائياً)
 
-التحسينات v2.0:
+التحسينات v2.1:
+  ✓ تحديث الموديل لـ playai-tts-arabic
+  ✓ تحديث الأصوات للأسماء الصحيحة
   ✓ يرث من BaseTTS
   ✓ TTSResult dataclass
   ✓ Parallel chunk processing
   ✓ Caching ذكي
-  ✓ يستخدم EdgeTTS class الموجود
   ✓ Cleanup تلقائي للملفات المؤقتة
   ✓ Stats tracking
   ✓ pydub بدل ffmpeg للدمج
@@ -45,50 +46,52 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Voices
+# Voices (Updated - playai-tts-arabic)
 # ═══════════════════════════════════════════════════════════════════
 GROQ_VOICES: dict[str, VoiceInfo] = {
-    "fahad": VoiceInfo(
-        "fahad", "Fahad", "male", "ar-SA",
-        "صوت ذكوري عميق - تحفيزي",
+    "Ahmad-PlayAI": VoiceInfo(
+        "Ahmad-PlayAI", "Ahmad", "male", "ar",
+        "صوت ذكوري واضح - مناسب للتحفيز",
         provider="groq"
     ),
-    "sultan": VoiceInfo(
-        "sultan", "Sultan", "male", "ar-SA",
-        "صوت ذكوري رسمي - دراماتيكي",
+    "Amira-PlayAI": VoiceInfo(
+        "Amira-PlayAI", "Amira", "female", "ar",
+        "صوت أنثوي دافئ - مناسب للقصص",
         provider="groq"
     ),
-    "noura": VoiceInfo(
-        "noura", "Noura", "female", "ar-SA",
-        "صوت أنثوي - عاطفي",
+    "Khalid-PlayAI": VoiceInfo(
+        "Khalid-PlayAI", "Khalid", "male", "ar",
+        "صوت ذكوري عميق - مناسب للتعليم",
         provider="groq"
     ),
-    "lulwa": VoiceInfo(
-        "lulwa", "Lulwa", "female", "ar-SA",
-        "صوت أنثوي - دافئ",
+    "Nasser-PlayAI": VoiceInfo(
+        "Nasser-PlayAI", "Nasser", "male", "ar",
+        "صوت ذكوري قوي - مناسب للدراما",
         provider="groq"
     ),
 }
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Mappings
+# Mappings (Updated)
 # ═══════════════════════════════════════════════════════════════════
 MOOD_VOICE_MAP: dict[str, str] = {
-    "epic":          "fahad",
-    "motivational":  "fahad",
-    "motivation":    "fahad",
-    "dramatic":      "sultan",
-    "dark":          "sultan",
-    "sigma":         "sultan",
-    "psychological": "sultan",
-    "horror":        "sultan",
-    "emotional":     "noura",
-    "sad":           "noura",
-    "romantic":      "lulwa",
-    "calm":          "lulwa",
-    "educational":   "sultan",
-    "scientific":    "sultan",
+    "epic":          "Ahmad-PlayAI",
+    "motivational":  "Ahmad-PlayAI",
+    "motivation":    "Ahmad-PlayAI",
+    "dramatic":      "Nasser-PlayAI",
+    "dark":          "Nasser-PlayAI",
+    "sigma":         "Nasser-PlayAI",
+    "psychological": "Nasser-PlayAI",
+    "horror":        "Nasser-PlayAI",
+    "emotional":     "Amira-PlayAI",
+    "sad":           "Amira-PlayAI",
+    "romantic":      "Amira-PlayAI",
+    "calm":          "Amira-PlayAI",
+    "educational":   "Khalid-PlayAI",
+    "scientific":    "Khalid-PlayAI",
+    "story":         "Amira-PlayAI",
+    "quote":         "Khalid-PlayAI",
 }
 
 
@@ -126,16 +129,18 @@ class GroqTTSStats:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Constants
+# Constants (Updated)
 # ═══════════════════════════════════════════════════════════════════
 class GroqTTSConstants:
     """ثوابت Groq TTS."""
     
+    # ✅ FIXED: الموديل الصحيح الجديد
     ARABIC_MODEL = "playai-tts-arabic"
     
     MAX_CHARS = 190  # حد الموديل 200، نترك هامش
     
-    DEFAULT_VOICE = "fahad"
+    # ✅ FIXED: الصوت الافتراضي الجديد
+    DEFAULT_VOICE = "Ahmad-PlayAI"
     
     MAX_RETRIES = 2
     RETRY_DELAY = 2
@@ -151,7 +156,7 @@ class GroqTTSConstants:
 # Main Class
 # ═══════════════════════════════════════════════════════════════════
 class GroqTTS(BaseTTS):
-    """محرك Groq TTS v2.0."""
+    """محرك Groq TTS v2.1."""
     
     PROVIDER_NAME = "groq_tts"
     PAUSE_FORMAT = "simple"
@@ -188,11 +193,12 @@ class GroqTTS(BaseTTS):
         except ImportError:
             raise RuntimeError("❌ pydub غير مثبت: pip install pydub")
         
-        # Edge TTS for fallback
+        # Edge TTS for fallback (من engine.voice وليس engine.video.voice)
         self._edge_tts = None
         if enable_edge_fallback:
             try:
-                from engine.video.voice.edge_tts_engine import EdgeTTS
+                # ✅ FIXED: المسار الصحيح
+                from engine.voice.edge_tts_engine import EdgeTTS
                 self._edge_tts = EdgeTTS(cache_enabled=cache_enabled)
                 logger.info("✓ Edge TTS fallback enabled")
             except Exception as e:
@@ -203,7 +209,7 @@ class GroqTTS(BaseTTS):
         self._stats_lock = Lock()
         
         logger.info(
-            f"🎙️ Groq TTS v2.0 | Model: {GroqTTSConstants.ARABIC_MODEL} | "
+            f"🎙️ Groq TTS v2.1 | Model: {GroqTTSConstants.ARABIC_MODEL} | "
             f"Parallel: {parallel_chunks}"
         )
     
@@ -648,7 +654,7 @@ if __name__ == "__main__":
     )
     
     print("=" * 60)
-    print("🎙️ Groq TTS v2.0 Test")
+    print("🎙️ Groq TTS v2.1 Test")
     print("=" * 60)
     
     print(f"\n📋 Voices: {len(GROQ_VOICES)}")
