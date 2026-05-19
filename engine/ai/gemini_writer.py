@@ -59,23 +59,25 @@ ContentType = Literal["motivational", "educational", "story", "quote"]
 
 
 class GeminiModel(str, Enum):
-    """الموديلات المتاحة من Gemini (محدّثة 2025)."""
-    # ✅ FIXED: الموديلات الجديدة
+    """الموديلات المتاحة من Gemini (2026)."""
+    # ⭐ Gemini 2.5 (الأحدث)
+    FLASH_25 = "gemini-2.5-flash"
+    FLASH_LITE_25 = "gemini-2.5-flash-lite"
+    PRO_25 = "gemini-2.5-pro"
+    
+    # Gemini 2.0 (احتياطي)
     FLASH_2 = "gemini-2.0-flash"
     FLASH_LITE_2 = "gemini-2.0-flash-lite"
-    FLASH_EXP = "gemini-2.0-flash-exp"
-    PRO_15 = "gemini-1.5-pro-latest"  # احتياطي
-    FLASH_15 = "gemini-1.5-flash-latest"  # احتياطي
     
     @classmethod
     def fallback_chain(cls) -> list["GeminiModel"]:
-        """سلسلة الـ fallback مرتبة (الأحدث أولاً)."""
+        """سلسلة الـ fallback (الأسرع أولاً)."""
         return [
-            cls.FLASH_2,        # ⭐ الأفضل والأسرع
-            cls.FLASH_LITE_2,   # سريع
-            cls.FLASH_EXP,      # تجريبي
-            cls.FLASH_15,       # احتياطي
-            cls.PRO_15,         # احتياطي أخير
+            cls.FLASH_25,        # ⭐ الأفضل في 2026
+            cls.FLASH_LITE_25,   # سريع جداً
+            cls.FLASH_2,         # احتياطي مستقر
+            cls.FLASH_LITE_2,    # احتياطي خفيف
+            cls.PRO_25,          # احتياطي قوي (أبطأ)
         ]
 
 
