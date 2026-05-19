@@ -1,17 +1,14 @@
 /**
- * 🎵 Audio Track Component v2.0
+ * 🎵 Audio Track Component v2.1
  * ═══════════════════════════════════════════════════════════════
- * تشغيل الصوت مع:
- *   ✓ Fade in/out قابل للتخصيص
- *   ✓ staticFile() للمسارات
- *   ✓ Loop support
- *   ✓ Playback rate
- *   ✓ Performance optimized
- *   ✓ Multiple tracks support
+ * إصلاحات v2.1:
+ *   ✓ import React مضاف
+ *   ✓ /public/ prefix handling
+ *   ✓ لا @types alias
  * ═══════════════════════════════════════════════════════════════
  */
 
-import { useMemo, memo } from 'react';
+import React, { useMemo, memo } from 'react';
 import {
   Audio,
   Loop,
@@ -25,53 +22,33 @@ import {
 // Types
 // ═══════════════════════════════════════════════════════════════
 export interface AudioTrackProps {
-  /** مسار الصوت (نسبي أو URL) */
   src: string;
-  
-  /** الحجم (0.0 - 1.0) */
   volume?: number;
-  
-  /** بداية القراءة من الصوت (frames) */
   startFrom?: number;
-  
-  /** نهاية القراءة من الصوت (frames) */
   endAt?: number;
-  
-  /** مدة fade in بالثواني */
   fadeInDuration?: number;
-  
-  /** مدة fade out بالثواني */
   fadeOutDuration?: number;
-  
-  /** تكرار الصوت إذا كان أقصر من الفيديو */
   loop?: boolean;
-  
-  /** سرعة التشغيل (1.0 = طبيعي) */
   playbackRate?: number;
-  
-  /** متى يبدأ الصوت في الفيديو (frames) */
   startInVideo?: number;
-  
-  /** مدة الصوت في الفيديو (frames) */
   durationInVideo?: number;
-  
-  /** Mute (للـ debugging) */
   muted?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════
 // Constants
 // ═══════════════════════════════════════════════════════════════
-const DEFAULT_FADE_IN = 0.5;   // seconds
-const DEFAULT_FADE_OUT = 0.5;  // seconds
+const DEFAULT_FADE_IN = 0.5;
+const DEFAULT_FADE_OUT = 0.5;
 const MIN_VOLUME = 0;
 const MAX_VOLUME = 1;
 
 // ═══════════════════════════════════════════════════════════════
 // Helpers
 // ═══════════════════════════════════════════════════════════════
+
 /**
- * تحويل المسار النسبي إلى staticFile URL
+ * ✅ FIXED: تنظيف عميق للمسار + معالجة /public/
  */
 const resolveAudioPath = (src: string): string => {
   if (!src) return '';
@@ -81,29 +58,28 @@ const resolveAudioPath = (src: string): string => {
     return src;
   }
   
-  // file:// protocol
   if (src.startsWith('file://')) {
     return src;
   }
   
-  // مسار مطلق محلي
-  if (src.startsWith('/')) {
-    return src;
-  }
+  // ✅ تنظيف عميق
+  let cleanSrc = src;
   
-  // مسار نسبي - استخدم staticFile
-  return staticFile(src);
+  // احذف كل أنواع /public/
+  cleanSrc = cleanSrc.replace(/^\/?(public\/)+/i, '');
+  
+  // احذف / في البداية
+  cleanSrc = cleanSrc.replace(/^\/+/, '');
+  
+  return staticFile(cleanSrc);
 };
 
-/**
- * Clamp value بين حدود
- */
 const clamp = (value: number, min: number, max: number): number => {
   return Math.min(Math.max(value, min), max);
 };
 
 // ═══════════════════════════════════════════════════════════════
-// Main Component (memoized)
+// Main Component
 // ═══════════════════════════════════════════════════════════════
 export const AudioTrack: React.FC<AudioTrackProps> = memo(
   ({
@@ -121,63 +97,34 @@ export const AudioTrack: React.FC<AudioTrackProps> = memo(
   }) => {
     const { fps, durationInFrames } = useVideoConfig();
 
-    // ─── Validation (مرة واحدة) ───────────────────────────────
-    if (!src) {
-      // ⚠ لا console.warn (يعمل كل frame!)
+    if (!src || muted) {
       return null;
     }
 
-    if (muted) {
-      return null;
-    }
-
-    // ─── Resolved Path ────────────────────────────────────────
     const audioSrc = useMemo(() => resolveAudioPath(src), [src]);
-
-    // ─── Volume Settings ──────────────────────────────────────
+    
     const safeVolume = clamp(volume, MIN_VOLUME, MAX_VOLUME);
     const fadeInFrames = Math.floor(fadeInDuration * fps);
     const fadeOutFrames = Math.floor(fadeOutDuration * fps);
     
-    // مدة الصوت في الفيديو
     const audioDurationFrames = durationInVideo ?? durationInFrames;
     const fadeOutStart = audioDurationFrames - fadeOutFrames;
 
-    // ─── Volume Function (Remotion-optimized) ─────────────────
-    /**
-     * استخدام function بدلاً من number
-     * Remotion يحسبها بكفاءة بدون re-render
-     */
     const volumeFunction = useMemo(
       () => (frame: number) => {
-        // Fade in
         const fadeIn = interpolate(
-          frame,
-          [0, fadeInFrames],
-          [0, safeVolume],
-          {
-            extrapolateLeft: 'clamp',
-            extrapolateRight: 'clamp',
-          },
+          frame, [0, fadeInFrames], [0, safeVolume],
+          { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
         );
-
-        // Fade out
         const fadeOut = interpolate(
-          frame,
-          [fadeOutStart, audioDurationFrames],
-          [safeVolume, 0],
-          {
-            extrapolateLeft: 'clamp',
-            extrapolateRight: 'clamp',
-          },
+          frame, [fadeOutStart, audioDurationFrames], [safeVolume, 0],
+          { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
         );
-
         return Math.min(fadeIn, fadeOut);
       },
       [fadeInFrames, fadeOutStart, audioDurationFrames, safeVolume],
     );
 
-    // ─── Audio Component ──────────────────────────────────────
     const audioElement = (
       <Audio
         src={audioSrc}
@@ -188,20 +135,15 @@ export const AudioTrack: React.FC<AudioTrackProps> = memo(
       />
     );
 
-    // ─── Wrap with Loop if needed ─────────────────────────────
     const wrappedAudio = loop ? (
       <Loop durationInFrames={audioDurationFrames}>{audioElement}</Loop>
     ) : (
       audioElement
     );
 
-    // ─── Wrap with Sequence if startInVideo > 0 ───────────────
     if (startInVideo > 0) {
       return (
-        <Sequence
-          from={startInVideo}
-          durationInFrames={audioDurationFrames}
-        >
+        <Sequence from={startInVideo} durationInFrames={audioDurationFrames}>
           {wrappedAudio}
         </Sequence>
       );
@@ -214,7 +156,7 @@ export const AudioTrack: React.FC<AudioTrackProps> = memo(
 AudioTrack.displayName = 'AudioTrack';
 
 // ═══════════════════════════════════════════════════════════════
-// 🎼 Multi-Track Audio (مفيد لـ voice + music + sfx)
+// Multi-Track Audio
 // ═══════════════════════════════════════════════════════════════
 export interface MultiAudioTrackProps {
   tracks: AudioTrackProps[];
@@ -235,7 +177,7 @@ export const MultiAudioTrack: React.FC<MultiAudioTrackProps> = memo(
 MultiAudioTrack.displayName = 'MultiAudioTrack';
 
 // ═══════════════════════════════════════════════════════════════
-// 🎵 Background Music Helper
+// Background Music
 // ═══════════════════════════════════════════════════════════════
 export interface BackgroundMusicProps {
   src: string;
@@ -261,11 +203,11 @@ export const BackgroundMusic: React.FC<BackgroundMusicProps> = memo(
 BackgroundMusic.displayName = 'BackgroundMusic';
 
 // ═══════════════════════════════════════════════════════════════
-// 🔊 SFX Audio (مؤثرات قصيرة)
+// SFX Audio
 // ═══════════════════════════════════════════════════════════════
 export interface SFXAudioProps {
   src: string;
-  startInVideo: number;  // frame
+  startInVideo: number;
   volume?: number;
   durationInFrames?: number;
 }
@@ -278,7 +220,7 @@ export const SFXAudio: React.FC<SFXAudioProps> = memo(
         volume={volume}
         startInVideo={startInVideo}
         durationInVideo={durationInFrames}
-        fadeInDuration={0.05}  // سريع للـ SFX
+        fadeInDuration={0.05}
         fadeOutDuration={0.1}
       />
     );
@@ -287,7 +229,4 @@ export const SFXAudio: React.FC<SFXAudioProps> = memo(
 
 SFXAudio.displayName = 'SFXAudio';
 
-// ═══════════════════════════════════════════════════════════════
-// Default Export
-// ═══════════════════════════════════════════════════════════════
 export default AudioTrack;
