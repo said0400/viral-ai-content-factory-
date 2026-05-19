@@ -88,21 +88,31 @@ const DEFAULT_SHAKE_INTENSITY = 2.0;
 const resolveVideoPath = (src: string): string => {
   if (!src) return '';
   
+  // URLs خارجية
   if (src.startsWith('http://') || src.startsWith('https://')) {
     return src;
   }
   
+  // file:// protocol
   if (src.startsWith('file://')) {
     return src;
   }
   
-  if (src.startsWith('/')) {
-    return src;
+  // إذا يحتوي /public/ احذفه (staticFile يضيفه تلقائياً)
+  let cleanSrc = src;
+  if (cleanSrc.startsWith('/public/')) {
+    cleanSrc = cleanSrc.substring(8);  // احذف "/public/"
+  } else if (cleanSrc.startsWith('public/')) {
+    cleanSrc = cleanSrc.substring(7);  // احذف "public/"
   }
   
-  return staticFile(src);
+  // إذا مطلق (يبدأ بـ /)
+  if (cleanSrc.startsWith('/')) {
+    cleanSrc = cleanSrc.substring(1);  // احذف الـ "/" الأولى
+  }
+  
+  return staticFile(cleanSrc);
 };
-
 interface Transform {
   scale: number;
   x: number;
