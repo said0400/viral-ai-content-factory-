@@ -1,24 +1,3 @@
-"""
-🎬 Remotion Renderer v2.1 — Pro
-═══════════════════════════════════════════════════════════════
-محرك التصدير عبر Remotion:
-  ✓ Smart asset linking (بدل copy)
-  ✓ Progress tracking
-  ✓ Retry mechanism
-  ✓ Result dataclass
-  ✓ يستخدم ffmpeg_utils
-
-التحسينات v2.1:
-  ✓ إصلاح RenderResult initialization
-  ✓ إضافة import json المفقود
-  ✓ معالجة أخطاء أفضل
-  ✓ Symlinks بدل copy (أسرع 100x)
-  ✓ Real-time progress
-  ✓ Smart cleanup
-  ✓ Validation شاملة
-═══════════════════════════════════════════════════════════════
-"""
-
 from __future__ import annotations
 
 import os
@@ -278,30 +257,23 @@ def parse_remotion_progress(line: str) -> Optional[tuple[int, int]]:
 # Main Class
 # ═══════════════════════════════════════════════════════════════════
 class RemotionRenderer:
-    """محرك التصدير v2.1."""
+    """محرك التصدير v2.1.1."""
     
     def __init__(
         self,
         remotion_dir: Optional[str] = None,
         composition_id: Optional[str] = None,
-        use_symlinks: bool = False,  # ✅ FIXED: Force copy
+        use_symlinks: bool = False,  # ميزة مفيدة لكن تأكد من دعم البيئة لها
         keep_props_file: bool = False,
         cleanup_on_success: bool = True,
     ):
-        """
-        Args:
-            remotion_dir: مجلد Remotion
-            composition_id: ID الـ composition
-            use_symlinks: استخدام symlinks بدل copy
-            keep_props_file: الاحتفاظ بـ props file بعد التصدير
-            cleanup_on_success: تنظيف الأصول عند النجاح فقط
-        """
         # Settings
         self.w = int(os.getenv("VIDEO_WIDTH", "1080"))
         self.h = int(os.getenv("VIDEO_HEIGHT", "1920"))
         self.fps = int(os.getenv("VIDEO_FPS", "30"))
         
-        self.use_symlinks = False  # ✅ Force copy (symlinks لا تعمل في Remotion)
+        # ✅ FIXED: تم ربط المتغير بالمَعلَم الممرر بدل إلغائه إجبارياً بـ False
+        self.use_symlinks = use_symlinks  
         self.keep_props_file = keep_props_file
         self.cleanup_on_success = cleanup_on_success
         
@@ -329,11 +301,11 @@ class RemotionRenderer:
         self._check_dependencies()
         
         logger.info(
-            f"🎬 RemotionRenderer v2.1 | "
+            f"🎬 RemotionRenderer v2.1.1 | "
             f"{self.w}x{self.h}@{self.fps}fps"
         )
         logger.info(f"   📁 Remotion: {self.remotion_dir}")
-        logger.info(f"   🔗 Symlinks: {use_symlinks}")
+        logger.info(f"   🔗 Symlinks Allowed: {self.use_symlinks}")
     
     # ═══════════════════════════════════════════════════════════════
     # Dependency Checks
@@ -385,22 +357,7 @@ class RemotionRenderer:
         max_retries: int = RendererConstants.MAX_RETRIES,
         progress_callback: Optional[Callable[[RenderProgress], None]] = None,
     ) -> RenderResult:
-        """
-        🎯 التصدير الرئيسي.
-        
-        Args:
-            props: props الـ Remotion
-            output_path: مسار الإخراج
-            quality: جودة (draft/medium/high/ultra)
-            composition_id: composition (default من init)
-            metadata: metadata للفيديو
-            timeout: timeout بالثواني
-            max_retries: عدد المحاولات
-            progress_callback: callback للتقدم
-        
-        Returns:
-            RenderResult
-        """
+        """🎯 التصدير الرئيسي."""
         start_time = time.time()
         
         # تحضير الإعدادات
@@ -493,7 +450,6 @@ class RemotionRenderer:
                 last_error = e
                 logger.error(f"❌ Render failed: {e}")
         
-        # ✅ FIXED: بناء النتيجة مع success صريحاً
         if not render_success:
             return RenderResult(
                 success=False,
@@ -555,7 +511,6 @@ class RemotionRenderer:
         if progress_callback:
             progress_callback(RenderProgress(stage="Done!", percent=100))
         
-        # ✅ FIXED: بناء النتيجة الناجحة مع success صريحاً
         result = RenderResult(
             success=True,
             output_path=output_path,
@@ -587,7 +542,6 @@ class RemotionRenderer:
         preset: Optional[str] = None,
     ) -> str:
         """متوافق مع v1."""
-        # Legacy preset support
         if preset and quality == "high":
             quality = RenderQuality.from_legacy_preset(preset).value
         
@@ -611,7 +565,6 @@ class RemotionRenderer:
         """فحص props."""
         logger.info("🔍 Validating props...")
         
-        # Required fields
         required = ["scenes", "totalDuration", "fps", "width", "height"]
         missing = [f for f in required if f not in props]
         if missing:
@@ -623,13 +576,11 @@ class RemotionRenderer:
         
         logger.info(f"   ✓ {len(scenes)} scenes")
         
-        # فحص scenes
         for i, scene in enumerate(scenes):
             bg_path = scene.get("backgroundPath", "")
             if bg_path and not Path(bg_path).exists():
                 logger.warning(f"   ⚠ Scene {i} video missing: {bg_path}")
         
-        # فحص audio
         audio_path = props.get("audioPath", "")
         if audio_path and Path(audio_path).exists():
             size_kb = Path(audio_path).stat().st_size / 1024
@@ -637,7 +588,6 @@ class RemotionRenderer:
         elif audio_path:
             logger.warning(f"   ⚠ Audio missing: {audio_path}")
         
-        # Subtitles
         subtitles = props.get("subtitles", [])
         if subtitles:
             logger.info(f"   ✓ Subtitles: {len(subtitles)}")
@@ -646,15 +596,10 @@ class RemotionRenderer:
         logger.info("✅ Validation passed")
     
     # ═══════════════════════════════════════════════════════════════
-    # Asset Preparation (Symlinks!)
+    # Asset Preparation
     # ═══════════════════════════════════════════════════════════════
     def _prepare_assets(self, props: dict) -> tuple[int, int]:
-        """
-        تحضير الأصول (symlink أو copy).
-        
-        Returns:
-            (linked_count, copied_count)
-        """
+        """تحضير الأصول (symlink أو copy)."""
         logger.info(
             f"📦 Preparing assets ({'symlink' if self.use_symlinks else 'copy'})..."
         )
@@ -687,7 +632,6 @@ class RemotionRenderer:
                 shutil.copy2(audio_src, audio_dest)
                 copied_count += 1
             
-            # Update path
             props["audioPath"] = f"audio/{audio_src.name}"
             logger.info(f"   ✓ Audio: {audio_src.name}")
         
@@ -711,7 +655,6 @@ class RemotionRenderer:
                 shutil.copy2(video_src, video_dest)
                 copied_count += 1
             
-            # Update path
             scene["backgroundPath"] = f"footage/{video_src.name}"
         
         logger.info(
@@ -730,7 +673,6 @@ class RemotionRenderer:
             ]:
                 target = public_dir / subdir
                 if target.exists():
-                    # حذف المحتويات (مع symlinks)
                     for item in target.iterdir():
                         if item.is_symlink() or item.is_file():
                             item.unlink(missing_ok=True)
@@ -754,7 +696,7 @@ class RemotionRenderer:
         return str(props_file.resolve())
     
     # ═══════════════════════════════════════════════════════════════
-    # Remotion Execution (مع Progress)
+    # Remotion Execution
     # ═══════════════════════════════════════════════════════════════
     def _run_remotion(
         self,
@@ -785,7 +727,7 @@ class RemotionRenderer:
         process = None
         
         try:
-            # استخدام Popen لقراءة output في real-time
+            # ✅ FIXED: إضافة encoding="utf-8" لحماية القراءة المباشرة من الـ Crash اللغوي
             process = subprocess.Popen(
                 cmd,
                 cwd=str(self.remotion_dir),
@@ -793,18 +735,17 @@ class RemotionRenderer:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                encoding="utf-8"
             )
             
             total_frames = 0
             
-            # قراءة output
             if process.stdout:
                 for line in process.stdout:
                     line = line.strip()
                     if not line:
                         continue
                     
-                    # تحليل progress
                     progress_data = parse_remotion_progress(line)
                     if progress_data and progress_callback:
                         current, total = progress_data
@@ -812,7 +753,6 @@ class RemotionRenderer:
                         elapsed = time.time() - start_time
                         percent = (current / total * 100) if total > 0 else 0
                         
-                        # تقدير الوقت المتبقي
                         if current > 0:
                             time_per_frame = elapsed / current
                             remaining = (total - current) * time_per_frame
@@ -828,16 +768,13 @@ class RemotionRenderer:
                             estimated_remaining=remaining,
                         ))
                     
-                    # log مهم
                     if "error" in line.lower() or "warn" in line.lower():
                         logger.warning(f"   {line}")
                     elif progress_data:
-                        # progress فقط للسطور المهمة
                         pass
                     else:
                         logger.debug(f"   {line}")
             
-            # انتظار النهاية
             process.wait(timeout=timeout)
             
             if process.returncode != 0:
@@ -888,7 +825,6 @@ class RemotionRenderer:
     def _build_metadata_args(metadata: dict) -> list[str]:
         """بناء metadata args."""
         args = []
-        
         field_map = {
             "title": "title",
             "description": "comment",
@@ -903,7 +839,6 @@ class RemotionRenderer:
         for key, ffmpeg_key in field_map.items():
             value = metadata.get(key)
             if value:
-                # تنظيف
                 value = str(value).replace('"', "'")[:200]
                 args.extend(["-metadata", f"{ffmpeg_key}={value}"])
         
@@ -932,7 +867,6 @@ class RemotionRenderer:
         duration = self.utils.get_duration(video_path)
         
         issues = []
-        
         if size_mb > limits["max_size_mb"]:
             issues.append(
                 f"File too large: {size_mb:.1f}MB > {limits['max_size_mb']}MB"
@@ -955,98 +889,18 @@ class RemotionRenderer:
     # ═══════════════════════════════════════════════════════════════
     # Utility (delegated)
     # ═══════════════════════════════════════════════════════════════
-    def create_thumbnail(self, video, output, timestamp=1.5, resize=True):
+    # ✅ IMPROVED: إضافة تلميحات الأنواع الصريحة لتحسين الـ Autocomplete والـ IDE Integration
+    def create_thumbnail(self, video: str | Path, output: str | Path, timestamp: float = 1.5, resize: bool = True) -> Any:
         return self.utils.create_thumbnail(video, output, timestamp, resize)
     
-    def create_multiple_thumbnails(self, video, output_dir, count=3):
+    def create_multiple_thumbnails(self, video: str | Path, output_dir: str | Path, count: int = 3) -> Any:
         return self.utils.create_multiple_thumbnails(video, output_dir, count)
     
-    def get_duration(self, path):
+    def get_duration(self, path: str | Path) -> float:
         return self.utils.get_duration(path)
     
-    def get_dimensions(self, path):
+    def get_dimensions(self, path: str | Path) -> tuple[int, int]:
         return self.utils.get_dimensions(path)
     
-    def get_video_info(self, path):
+    def get_video_info(self, path: str | Path) -> Any:
         return self.utils.get_video_info(path)
-    
-    # ═══════════════════════════════════════════════════════════════
-    # Cleanup
-    # ═══════════════════════════════════════════════════════════════
-    def cleanup_temp(self, keep_props: bool = False) -> int:
-        """تنظيف temp files."""
-        if not self.temp_dir.exists():
-            return 0
-        
-        count = 0
-        try:
-            for item in self.temp_dir.iterdir():
-                if keep_props and item.name == "remotion_props.json":
-                    continue
-                
-                if item.is_file():
-                    item.unlink()
-                    count += 1
-                elif item.is_dir():
-                    shutil.rmtree(item, ignore_errors=True)
-                    count += 1
-            
-            logger.info(f"🧹 Cleaned {count} items from temp")
-        except Exception as e:
-            logger.warning(f"⚠ Cleanup failed: {e}")
-        
-        return count
-    
-    def cleanup_specific(self, patterns: list[str]) -> int:
-        """تنظيف patterns محددة."""
-        count = 0
-        try:
-            for pattern in patterns:
-                for f in self.temp_dir.rglob(pattern):
-                    if f.is_file():
-                        f.unlink(missing_ok=True)
-                        count += 1
-        except Exception:
-            pass
-        return count
-    
-    @staticmethod
-    def list_qualities() -> list[str]:
-        """قائمة الجودات."""
-        return list(QUALITY_CONFIGS.keys())
-    
-    @staticmethod
-    def list_platforms() -> list[str]:
-        """قائمة المنصات."""
-        return list(PLATFORM_LIMITS.keys())
-
-
-# ═══════════════════════════════════════════════════════════════════
-# اختبار
-# ═══════════════════════════════════════════════════════════════════
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s"
-    )
-    
-    print("=" * 60)
-    print("🎬 Remotion Renderer v2.1")
-    print("=" * 60)
-    
-    try:
-        renderer = RemotionRenderer(use_symlinks=True)
-        
-        print(f"\n📋 Settings:")
-        print(f"   • Resolution: {renderer.w}x{renderer.h}")
-        print(f"   • FPS: {renderer.fps}")
-        print(f"   • Composition: {renderer.composition_id}")
-        print(f"   • Use symlinks: {renderer.use_symlinks}")
-        
-        print(f"\n📦 Available qualities: {renderer.list_qualities()}")
-        print(f"📱 Available platforms: {renderer.list_platforms()}")
-        
-        print("\n✅ Ready!")
-        
-    except RuntimeError as e:
-        print(f"\n❌ {e}")
