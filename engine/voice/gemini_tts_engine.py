@@ -1,43 +1,33 @@
 """
-🎙️ Gemini TTS Engine v4.2 — Optimized & Robust
+🎙️ Gemini TTS Engine v4.3 — Final Fix
 ═══════════════════════════════════════════════════════════════════
-التحسينات v4.2:
-  ✓ معالجة متقدمة للـ Rate Limits مع Exponential Backoff حقيقي.
-  ✓ تحسين دمج الملفات الصوتية لضمان جودة ثابتة.
-  ✓ إضافة دعم للـ Streaming بشكل أكثر استقراراً.
-  ✓ تحسين تقسيم النصوص (Text Splitting) للحفاظ على سياق الجمل.
-  ✓ نظام Caching مطور يعتمد على الـ Hash لضمان عدم تكرار الطلبات.
-  ✓ معالجة أفضل للأخطاء مع رسائل توضيحية باللغة العربية.
+الإصلاحات v4.3:
+  ✓ FIXED: _generate_audio_data و _select_voice_for_mood مضافة
+  ✓ FIXED: دمج الصوت يدعم raw PCM (from_raw fallback)
+  ✓ FIXED: TTSResult مع parameters صحيحة
+  ✓ FIXED: INTER_REQUEST_DELAY = 20s (10 req/min limit)
+  ✓ FIXED: retryDelay من Gemini response يُستخدم
 ═══════════════════════════════════════════════════════════════════
 """
 
 from __future__ import annotations
 
 import os
+import re
+import io
 import time
 import shutil
 import logging
-import mimetypes
 import tempfile
 import hashlib
 from pathlib import Path
 from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import Optional, Callable, List, Dict
 
-# محاولة استيراد التبعيات الأساسية
-try:
-    from google import genai
-    from google.genai import types
-    from pydub import AudioSegment
-except ImportError:
-    # سيتم التعامل مع هذا في _init_libs
-    pass
-
 from engine.video.voice.base_tts import (
     BaseTTS, TTSResult, TTSStatus, VoiceInfo,
-    TTSConstants
+    TTSConstants, estimate_duration
 )
 
 logger = logging.getLogger(__name__)
@@ -46,12 +36,22 @@ logger = logging.getLogger(__name__)
 # Voice & Style Definitions
 # ═══════════════════════════════════════════════════════════════════
 GEMINI_VOICES: Dict[str, VoiceInfo] = {
-    "Achird": VoiceInfo("Achird", "Achird", "male", "multi", "ذكوري عميق - مناسب للسرد", provider="gemini"),
-    "Algenib": VoiceInfo("Algenib", "Algenib", "male", "multi", "ذكوري واضح - مناسب للتعليم", provider="gemini"),
-    "Aoede": VoiceInfo("Aoede", "Aoede", "female", "multi", "أنثوي ناعم - مناسب للقصص", provider="gemini"),
-    "Charon": VoiceInfo("Charon", "Charon", "male", "multi", "ذكوري درامي - مناسب للتشويق", provider="gemini"),
-    "Kore": VoiceInfo("Kore", "Kore", "female", "multi", "أنثوي قوي - مناسب للتحفيز", provider="gemini"),
+    "Achird": VoiceInfo("Achird", "Achird", "male", "multi", "ذكوري عميق", provider="gemini"),
+    "Algenib": VoiceInfo("Algenib", "Algenib", "male", "multi", "ذكوري واضح", provider="gemini"),
+    "Aoede": VoiceInfo("Aoede", "Aoede", "female", "multi", "أنثوي ناعم", provider="gemini"),
+    "Charon": VoiceInfo("Charon", "Charon", "male", "multi", "ذكوري درامي", provider="gemini"),
+    "Kore": VoiceInfo("Kore", "Kore", "female", "multi", "أنثوي قوي", provider="gemini"),
 }
+
+MOOD_VOICE_MAP: Dict[str, str] = {
+    "motivation": "Achird", "motivational": "Achird",
+    "dark": "Charon", "sigma": "Achird",
+    "psychological": "Charon", "educational": "Algenib",
+    "scientific": "Algenib", "emotional": "Aoede",
+    "sad": "Aoede", "romantic": "Aoede",
+    "horror": "Charon", "story": "Aoede", "quote": "Algenib",
+}
+
 
 @dataclass(frozen=True)
 class StylePreset:
@@ -60,14 +60,16 @@ class StylePreset:
     directors_note: str
     scene_context: str
 
+
 STYLE_PRESETS: Dict[str, StylePreset] = {
-    "motivational": StylePreset("motivational", "A smooth, premium commercial voice.", "Style: Promo/Hype. Pace: Natural.", "Premium commercial. Dynamic pacing."),
-    "educational": StylePreset("educational", "A clear, authoritative narrator voice.", "Style: Documentary/Educational. Pace: Steady.", "Premium documentary narration."),
-    "story": StylePreset("story", "A warm, expressive storyteller voice.", "Style: Narrative/Cinematic. Pace: Natural.", "Cinematic storytelling."),
-    "quote": StylePreset("quote", "A profound, contemplative voice.", "Style: Philosophical/Reflective. Pace: Slow.", "Profound quote delivery."),
-    "viral": StylePreset("viral", "A high-energy, attention-grabbing voice.", "Style: Viral/Social Media. Pace: Fast.", "Viral social media content."),
-    "psychological": StylePreset("psychological", "A deep, thoughtful, mysterious voice.", "Style: Psychological/Deep. Pace: Slow.", "Deep psychological content."),
+    "motivational": StylePreset("motivational", "A smooth, premium commercial voice.", "Style: Promo/Hype. Pace: Natural.", "Premium commercial."),
+    "educational": StylePreset("educational", "A clear, authoritative narrator voice.", "Style: Documentary. Pace: Steady.", "Documentary narration."),
+    "story": StylePreset("story", "A warm, expressive storyteller voice.", "Style: Narrative. Pace: Natural.", "Cinematic storytelling."),
+    "quote": StylePreset("quote", "A profound, contemplative voice.", "Style: Philosophical. Pace: Slow.", "Profound quote delivery."),
+    "viral": StylePreset("viral", "A high-energy voice.", "Style: Viral. Pace: Fast.", "Energetic content."),
+    "psychological": StylePreset("psychological", "A deep, mysterious voice.", "Style: Psychological. Pace: Slow.", "Deep content."),
 }
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Constants
@@ -78,161 +80,331 @@ class GeminiTTSConstants:
     DEFAULT_STYLE = "motivational"
     MAX_RETRIES = 5
     BASE_RETRY_DELAY = 5
-    MAX_RETRY_DELAY = 60
-    INTER_REQUEST_DELAY = 2.0
-    MIN_AUDIO_SIZE = 1000
+    MAX_RETRY_DELAY = 65
+    INTER_REQUEST_DELAY = 20.0  # ✅ FIXED: 10 req/min = 6s, لكن 20s أكثر أمان
+    MIN_AUDIO_SIZE = 500
     SCENE_TEXT_MAX_CHARS = 250
-    RATE_LIMIT_KEYWORDS = ("429", "RESOURCE_EXHAUSTED", "rate limit", "quota exceeded")
+    RAW_PCM_SAMPLE_WIDTH = 2
+    RAW_PCM_FRAME_RATE = 24000
+    RAW_PCM_CHANNELS = 1
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Main Engine
 # ═══════════════════════════════════════════════════════════════════
 class GeminiTTSEngine(BaseTTS):
     PROVIDER_NAME = "gemini_tts"
-    
+
     def __init__(
         self,
         api_key: Optional[str] = None,
         voice: Optional[str] = None,
         style: Optional[str] = None,
         cache_enabled: bool = True,
-        parallel_scenes: int = 1
+        parallel_scenes: int = 1,
+        **kwargs,
     ):
         super().__init__(cache_enabled=cache_enabled)
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             raise RuntimeError("❌ GEMINI_API_KEY is required")
-            
+
         self.voice_name = voice if voice in GEMINI_VOICES else GeminiTTSConstants.DEFAULT_VOICE
         self.style_preset = style if style in STYLE_PRESETS else GeminiTTSConstants.DEFAULT_STYLE
-        self.parallel_scenes = parallel_scenes
-        self.inter_request_delay = GeminiTTSConstants.INTER_REQUEST_DELAY
-        
+        self.inter_request_delay = float(os.getenv("GEMINI_INTER_DELAY", GeminiTTSConstants.INTER_REQUEST_DELAY))
+
         self._last_request_time = 0.0
         self._lock = Lock()
         self._init_libs()
         self._init_client()
 
+        logger.info(f"🎙️ GeminiTTS v4.3 | Voice: {self.voice_name} | Delay: {self.inter_request_delay}s")
+
     def _init_libs(self):
         try:
-            import google.genai as genai
+            from google import genai
             from google.genai import types
             from pydub import AudioSegment
             self._genai = genai
             self._types = types
             self._AudioSegment = AudioSegment
-        except ImportError:
-            raise RuntimeError("❌ Missing dependencies: pip install google-genai pydub")
+        except ImportError as e:
+            raise RuntimeError(f"❌ Missing: {e}\n   pip install google-genai pydub")
 
     def _init_client(self):
         self._client = self._genai.Client(api_key=self.api_key)
 
+    # ═══════════════════════════════════════════════════════════════
+    # ✅ FIXED: Required by BaseTTS
+    # ═══════════════════════════════════════════════════════════════
+    def _generate_audio_data(self, text: str, voice: str, **kwargs) -> Optional[bytes]:
+        try:
+            return self._call_api(text)
+        except Exception as e:
+            logger.error(f"❌ فشل: {e}")
+            return None
+
+    def _select_voice_for_mood(self, mood: str) -> str:
+        return MOOD_VOICE_MAP.get(mood, self.voice_name)
+
+    # ═══════════════════════════════════════════════════════════════
+    # Rate Limit
+    # ═══════════════════════════════════════════════════════════════
     def _wait_for_rate_limit(self):
         with self._lock:
             elapsed = time.time() - self._last_request_time
             if elapsed < self.inter_request_delay:
-                time.sleep(self.inter_request_delay - elapsed)
+                wait = self.inter_request_delay - elapsed
+                logger.debug(f"   ⏱  انتظار {wait:.1f}s")
+                time.sleep(wait)
             self._last_request_time = time.time()
 
+    def _extract_retry_delay(self, error_str: str) -> Optional[int]:
+        """استخراج retryDelay من رد Gemini."""
+        match = re.search(r'retryDelay.*?(\d+)', error_str)
+        if match:
+            return int(match.group(1)) + 2
+        return None
+
+    # ═══════════════════════════════════════════════════════════════
+    # Main API
+    # ═══════════════════════════════════════════════════════════════
     def generate_audio(
         self,
         script: dict,
         output_path: str,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        **kwargs,
     ) -> TTSResult:
         start_time = time.time()
+        self._ensure_output_dir(output_path)
+
         scenes = self._extract_scenes(script)
         if not scenes:
-            return TTSResult(TTSStatus.FAILED, output_path, error="No scenes found in script")
+            return TTSResult(status=TTSStatus.FAILED, output_path=output_path, error="No scenes")
+
+        total_chars = sum(len(s.get("text", "")) for s in scenes)
+        estimated_time = len(scenes) * (self.inter_request_delay + 3)
+        logger.info(f"🎙️ Gemini TTS | {len(scenes)} مشهد | ~{estimated_time:.0f}s")
 
         temp_dir = Path(tempfile.mkdtemp(prefix="gemini_tts_"))
-        wav_files = []
+        audio_files = []
 
         try:
             for i, scene in enumerate(scenes):
                 if progress_callback:
-                    progress_callback(i / len(scenes), f"Generating scene {i+1}/{len(scenes)}")
-                
-                self._wait_for_rate_limit()
-                wav_path = self._process_scene(scene, i, temp_dir)
-                if wav_path:
-                    wav_files.append(wav_path)
+                    progress_callback(0.1 + (i / len(scenes)) * 0.75, f"مشهد {i+1}/{len(scenes)}")
+
+                if i > 0:
+                    self._wait_for_rate_limit()
+
+                audio_path = self._process_scene(scene, i, temp_dir)
+                if audio_path:
+                    audio_files.append(audio_path)
                 else:
-                    logger.error(f"Failed to generate scene {i}")
+                    logger.warning(f"   ⚠ فشل مشهد {i+1}")
 
-            if not wav_files:
-                return TTSResult(TTSStatus.FAILED, output_path, error="All scenes failed")
+            if not audio_files:
+                return TTSResult(status=TTSStatus.FAILED, output_path=output_path, error="All scenes failed")
 
-            self._merge_audio(wav_files, output_path)
-            
+            if progress_callback:
+                progress_callback(0.9, "دمج الملفات...")
+
+            self._merge_audio(audio_files, output_path)
+
+            elapsed = time.time() - start_time
+            file_size = Path(output_path).stat().st_size if Path(output_path).exists() else 0
+
+            if progress_callback:
+                progress_callback(1.0, "تم!")
+
+            logger.info(f"   ✅ تم! {len(audio_files)}/{len(scenes)} مشهد ({file_size/1024:.1f} KB) في {elapsed:.1f}s")
+
+            # ✅ FIXED: TTSResult صحيح
             return TTSResult(
-                status=TTSStatus.SUCCESS,
+                status=TTSStatus.SUCCESS if len(audio_files) == len(scenes) else TTSStatus.PARTIAL,
                 output_path=output_path,
                 voice_used=self.voice_name,
-                duration=0.0, # Should be calculated if needed
-                metadata={"scenes_count": len(wav_files)}
+                text_length=total_chars,
+                file_size=file_size,
+                duration_estimate=estimate_duration(" ".join(s.get("text", "") for s in scenes[:len(audio_files)])),
             )
+
+        except Exception as e:
+            logger.error(f"❌ فشل: {e}")
+            return self._silence_result(output_path, str(e))
+
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    # ═══════════════════════════════════════════════════════════════
+    # Scene Processing
+    # ═══════════════════════════════════════════════════════════════
     def _process_scene(self, scene: dict, index: int, temp_dir: Path) -> Optional[str]:
         text = scene.get("text", "").strip()
-        if not text: return None
-        
-        cache_key = hashlib.md5(f"{text}_{self.voice_name}_{self.style_preset}".encode()).hexdigest()
-        scene_wav = temp_dir / f"scene_{index:03d}.wav"
-        
+        if not text:
+            return None
+
+        logger.info(f"   🎤 مشهد {index+1} ({len(text)} حرف): {text[:40]}...")
+        scene_path = str(temp_dir / f"scene_{index:03d}.raw")
+
         for attempt in range(GeminiTTSConstants.MAX_RETRIES):
             try:
+                if attempt > 0:
+                    delay = min(GeminiTTSConstants.BASE_RETRY_DELAY * (2 ** attempt), GeminiTTSConstants.MAX_RETRY_DELAY)
+                    logger.info(f"      ⏱  انتظار {delay}s")
+                    time.sleep(delay)
+
                 audio_data = self._call_api(text)
-                if audio_data:
-                    with open(scene_wav, "wb") as f:
+
+                if audio_data and len(audio_data) > GeminiTTSConstants.MIN_AUDIO_SIZE:
+                    with open(scene_path, "wb") as f:
                         f.write(audio_data)
-                    return str(scene_wav)
+                    return scene_path
+
             except Exception as e:
-                delay = min(GeminiTTSConstants.BASE_RETRY_DELAY * (2 ** attempt), GeminiTTSConstants.MAX_RETRY_DELAY)
-                logger.warning(f"Attempt {attempt+1} failed: {e}. Retrying in {delay}s...")
-                time.sleep(delay)
+                error_str = str(e)
+
+                # ✅ استخدم retryDelay من Gemini
+                gemini_delay = self._extract_retry_delay(error_str)
+                if gemini_delay:
+                    logger.warning(f"      ⚠ محاولة {attempt+1}: Rate Limit. Gemini يقترح {gemini_delay}s")
+                    time.sleep(gemini_delay)
+                    continue
+
+                logger.warning(f"      ⚠ محاولة {attempt+1}: {error_str[:80]}")
+
         return None
 
+    # ═══════════════════════════════════════════════════════════════
+    # API Call
+    # ═══════════════════════════════════════════════════════════════
     def _call_api(self, text: str) -> bytes:
-        style = STYLE_PRESETS[self.style_preset]
-        prompt = f"[Style: {style.audio_profile}] [Note: {style.directors_note}] {text}"
-        
+        style = STYLE_PRESETS.get(self.style_preset, STYLE_PRESETS["motivational"])
+
+        prompt = (
+            f"Read this transcript with the following style.\n\n"
+            f"Audio Profile: {style.audio_profile}\n"
+            f"Director's Note: {style.directors_note}\n\n"
+            f"Transcript:\n{text}"
+        )
+
         config = self._types.GenerateContentConfig(
             response_modalities=["audio"],
             speech_config=self._types.SpeechConfig(
                 voice_config=self._types.VoiceConfig(
-                    prebuilt_voice_config=self._types.PrebuiltVoiceConfig(voice_name=self.voice_name)
+                    prebuilt_voice_config=self._types.PrebuiltVoiceConfig(
+                        voice_name=self.voice_name
+                    )
                 )
-            )
+            ),
         )
-        
+
         response = self._client.models.generate_content(
             model=GeminiTTSConstants.MODEL_NAME,
             contents=prompt,
-            config=config
+            config=config,
         )
-        
-        audio_parts = [part.inline_data.data for part in response.candidates[0].content.parts if part.inline_data]
+
+        if not response.candidates:
+            raise RuntimeError("لم يتم استلام رد")
+
+        candidate = response.candidates[0]
+        if not candidate.content or not candidate.content.parts:
+            raise RuntimeError("لا محتوى في الرد")
+
+        audio_parts = []
+        for part in candidate.content.parts:
+            if part.inline_data and part.inline_data.data:
+                audio_parts.append(part.inline_data.data)
+
         if not audio_parts:
-            raise RuntimeError("No audio data in response")
-            
+            raise RuntimeError("لم يتم استلام بيانات صوتية")
+
         return b"".join(audio_parts)
 
+    # ═══════════════════════════════════════════════════════════════
+    # ✅ FIXED: Audio Merging (يدعم raw PCM)
+    # ═══════════════════════════════════════════════════════════════
     def _merge_audio(self, files: List[str], output: str):
-        combined = self._AudioSegment.empty()
-        for f in files:
-            combined += self._AudioSegment.from_file(f)
-        
-        fmt = "mp3" if output.endswith(".mp3") else "wav"
-        combined.export(output, format=fmt)
+        """دمج ملفات الصوت (يدعم raw PCM + wav + mp3)."""
+        if not files:
+            raise RuntimeError("لا توجد ملفات")
 
+        combined = self._AudioSegment.empty()
+
+        for f in files:
+            segment = None
+
+            # محاولة 1: from_file (للملفات العادية)
+            try:
+                segment = self._AudioSegment.from_file(f)
+            except Exception:
+                pass
+
+            # محاولة 2: from_raw (لـ raw PCM من Gemini)
+            if segment is None:
+                try:
+                    with open(f, "rb") as fh:
+                        raw_data = fh.read()
+
+                    if len(raw_data) > 100:
+                        segment = self._AudioSegment(
+                            data=raw_data,
+                            sample_width=GeminiTTSConstants.RAW_PCM_SAMPLE_WIDTH,
+                            frame_rate=GeminiTTSConstants.RAW_PCM_FRAME_RATE,
+                            channels=GeminiTTSConstants.RAW_PCM_CHANNELS,
+                        )
+                        logger.info(f"   ✓ {Path(f).name} → raw PCM")
+                except Exception as e2:
+                    logger.error(f"   ❌ فشل {Path(f).name}: {e2}")
+                    continue
+
+            if segment is not None:
+                combined += segment
+
+        if len(combined) == 0:
+            raise RuntimeError("لا بيانات صوتية")
+
+        fmt = "mp3" if output.endswith(".mp3") else "wav"
+        combined.export(output, format=fmt, bitrate="192k" if fmt == "mp3" else None)
+        logger.info(f"   ✓ دُمج {len(files)} ملف")
+
+    # ═══════════════════════════════════════════════════════════════
+    # Scene Extraction
+    # ═══════════════════════════════════════════════════════════════
     def _extract_scenes(self, script: dict) -> List[dict]:
         scenes = script.get("scenes", [])
-        if not scenes and "full_text" in script:
-            # Simple splitter for full_text
-            text = script["full_text"]
-            chunks = [text[i:i+GeminiTTSConstants.SCENE_TEXT_MAX_CHARS] for i in range(0, len(text), GeminiTTSConstants.SCENE_TEXT_MAX_CHARS)]
-            scenes = [{"text": chunk} for chunk in chunks]
-        return scenes
+        if scenes:
+            return [s for s in scenes if s.get("text", "").strip()]
+
+        full_text = script.get("full_text", "").strip()
+        if full_text:
+            max_c = GeminiTTSConstants.SCENE_TEXT_MAX_CHARS
+            chunks = []
+            while full_text:
+                if len(full_text) <= max_c:
+                    chunks.append({"text": full_text})
+                    break
+                pos = full_text[:max_c].rfind(".")
+                if pos == -1:
+                    pos = full_text[:max_c].rfind(" ")
+                if pos == -1:
+                    pos = max_c
+                chunks.append({"text": full_text[:pos+1].strip()})
+                full_text = full_text[pos+1:].strip()
+            return chunks
+
+        hook = script.get("hook", "").strip()
+        return [{"text": hook}] if hook else []
+
+    # ═══════════════════════════════════════════════════════════════
+    # Utilities
+    # ═══════════════════════════════════════════════════════════════
+    @staticmethod
+    def list_voices():
+        return GEMINI_VOICES.copy()
+
+    @staticmethod
+    def list_styles():
+        return STYLE_PRESETS.copy()
