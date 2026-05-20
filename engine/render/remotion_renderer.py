@@ -156,7 +156,7 @@ QUALITY_CONFIGS: dict[str, QualityConfig] = {
 
 # ═══════════════════════════════════════════════════════════════════
 # Platform Limits (بالـ MB)
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 PLATFORM_LIMITS: dict[str, dict] = {
     "youtube_shorts": {
         "max_size_mb": 256,
@@ -188,7 +188,7 @@ PLATFORM_LIMITS: dict[str, dict] = {
 
 # ═══════════════════════════════════════════════════════════════════
 # Constants
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 class RendererConstants:
     """ثوابت."""
     
@@ -206,9 +206,9 @@ class RendererConstants:
     PUBLIC_AUDIO_DIR = "audio"
 
 
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 # Helpers
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 def try_symlink_or_copy(
     source: Path,
     destination: Path,
@@ -263,7 +263,7 @@ class RemotionRenderer:
         self,
         remotion_dir: Optional[str] = None,
         composition_id: Optional[str] = None,
-        use_symlinks: bool = False,  # ميزة مفيدة لكن تأكد من دعم البيئة لها
+        use_symlinks: bool = False,
         keep_props_file: bool = False,
         cleanup_on_success: bool = True,
     ):
@@ -272,8 +272,7 @@ class RemotionRenderer:
         self.h = int(os.getenv("VIDEO_HEIGHT", "1920"))
         self.fps = int(os.getenv("VIDEO_FPS", "30"))
         
-        # ✅ FIXED: تم ربط المتغير بالمَعلَم الممرر بدل إلغائه إجبارياً بـ False
-        self.use_symlinks = use_symlinks  
+        self.use_symlinks = use_symlinks
         self.keep_props_file = keep_props_file
         self.cleanup_on_success = cleanup_on_success
         
@@ -727,7 +726,6 @@ class RemotionRenderer:
         process = None
         
         try:
-            # ✅ FIXED: إضافة encoding="utf-8" لحماية القراءة المباشرة من الـ Crash اللغوي
             process = subprocess.Popen(
                 cmd,
                 cwd=str(self.remotion_dir),
@@ -889,7 +887,6 @@ class RemotionRenderer:
     # ═══════════════════════════════════════════════════════════════
     # Utility (delegated)
     # ═══════════════════════════════════════════════════════════════
-    # ✅ IMPROVED: إضافة تلميحات الأنواع الصريحة لتحسين الـ Autocomplete والـ IDE Integration
     def create_thumbnail(self, video: str | Path, output: str | Path, timestamp: float = 1.5, resize: bool = True) -> Any:
         return self.utils.create_thumbnail(video, output, timestamp, resize)
     
