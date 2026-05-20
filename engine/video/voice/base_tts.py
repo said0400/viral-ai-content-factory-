@@ -1,7 +1,12 @@
 """
-🎙️ Base TTS Engine
+🎙️ Base TTS Engine v2.1
 ═══════════════════════════════════════════════════════════════
 الكلاس الأساسي لجميع محركات TTS
+
+التحسينات v2.1:
+  ✓ FIXED: حذف ABC و abstractmethod (يمنع instantiation)
+  ✓ FIXED: إضافة PARTIAL status
+  ✓ FIXED: success يشمل PARTIAL و CACHED
 
 يحتوي على:
   ✓ TTSResult dataclass
@@ -20,7 +25,6 @@ import shutil
 import hashlib
 import logging
 import subprocess
-from abc import ABC, abstractmethod
 from pathlib import Path
 from enum import Enum
 from dataclasses import dataclass, field
@@ -35,6 +39,7 @@ logger = logging.getLogger(__name__)
 class TTSStatus(str, Enum):
     """حالة توليد الصوت."""
     SUCCESS = "success"
+    PARTIAL = "partial"              # ✅ NEW: بعض المشاهد نجحت
     FALLBACK_VOICE = "fallback_voice"
     CACHED = "cached"
     SILENCE = "silence"
@@ -52,12 +57,14 @@ class TTSResult:
     duration_estimate: float = 0.0
     error: Optional[str] = None
     cached: bool = False
-    cost_estimate: float = 0.0  # بالعملة أو حروف
+    cost_estimate: float = 0.0
     
     @property
     def success(self) -> bool:
+        # ✅ FIXED: يشمل PARTIAL و CACHED
         return self.status in (
             TTSStatus.SUCCESS,
+            TTSStatus.PARTIAL,
             TTSStatus.FALLBACK_VOICE,
             TTSStatus.CACHED,
         )
@@ -106,13 +113,7 @@ def estimate_duration(text: str) -> float:
 
 
 def get_pause_marker(pause_duration: float, format: str = "simple") -> str:
-    """
-    تحويل مدة الوقفة لعلامة.
-    
-    Args:
-        pause_duration: مدة الوقفة بالثواني
-        format: "simple" أو "ssml"
-    """
+    """تحويل مدة الوقفة لعلامة."""
     if format == "ssml":
         if pause_duration >= 0.8:
             return '<break time="1s"/>'
@@ -122,7 +123,6 @@ def get_pause_marker(pause_duration: float, format: str = "simple") -> str:
             return '<break time="0.3s"/>'
         return ""
     
-    # simple format
     if pause_duration >= 0.8:
         return "... "
     elif pause_duration >= 0.5:
@@ -133,13 +133,13 @@ def get_pause_marker(pause_duration: float, format: str = "simple") -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Base TTS Class
+# ✅ FIXED: Base TTS Class (بدون ABC و abstractmethod)
 # ═══════════════════════════════════════════════════════════════════
-class BaseTTS(ABC):
+class BaseTTS:
     """الكلاس الأساسي لجميع محركات TTS."""
     
     PROVIDER_NAME: str = "base"
-    PAUSE_FORMAT: str = "simple"  # "simple" أو "ssml"
+    PAUSE_FORMAT: str = "simple"
     MAX_TEXT_LENGTH: int = 5000
     
     def __init__(
@@ -168,22 +168,22 @@ class BaseTTS(ABC):
             )
     
     # ═══════════════════════════════════════════════════════════════
-    # Abstract Methods
+    # ✅ FIXED: Methods عادية بدلاً من abstract
     # ═══════════════════════════════════════════════════════════════
-    @abstractmethod
     def _generate_audio_data(
         self,
         text: str,
         voice: str,
         **kwargs,
     ) -> Optional[bytes]:
-        """التوليد الفعلي - يجب تطبيقه في subclasses."""
-        pass
+        """التوليد الفعلي - يجب override في subclasses."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement _generate_audio_data()"
+        )
     
-    @abstractmethod
     def _select_voice_for_mood(self, mood: str) -> str:
-        """اختيار الصوت حسب المزاج."""
-        pass
+        """اختيار الصوت حسب المزاج - يجب override في subclasses."""
+        return "default"
     
     # ═══════════════════════════════════════════════════════════════
     # Public API
@@ -268,7 +268,7 @@ class BaseTTS(ABC):
                 text_length=len(full_text),
                 file_size=len(audio_data),
                 duration_estimate=estimate_duration(full_text),
-                cost_estimate=len(full_text),  # حروف
+                cost_estimate=len(full_text),
             )
             
         except Exception as e:
