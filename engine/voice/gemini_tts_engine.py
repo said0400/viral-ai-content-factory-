@@ -1,12 +1,9 @@
 """
-🎙️ Gemini TTS Engine v4.3 — Final Fix
+🎙️ Gemini TTS Engine v4.3 — Final Fix (Chunked & Optimized)
 ═══════════════════════════════════════════════════════════════════
-الإصلاحات v4.3:
-  ✓ FIXED: _generate_audio_data و _select_voice_for_mood مضافة
-  ✓ FIXED: دمج الصوت يدعم raw PCM (from_raw fallback)
-  ✓ FIXED: TTSResult مع parameters صحيحة
-  ✓ FIXED: INTER_REQUEST_DELAY = 20s (10 req/min limit)
-  ✓ FIXED: retryDelay من Gemini response يُستخدم
+الإصلاحات المخصصة:
+  ✓ تجميع كافة المشاهد وتقسيمها إلى جزأين فقط (2 Parts) لتقليل طلبات الـ API.
+  ✓ تعديل وقت الانتظار عند الفشل (Rate Limit) ليكون 70 ثانية بين المحاولات.
 ═══════════════════════════════════════════════════════════════════
 """
 
@@ -79,9 +76,8 @@ class GeminiTTSConstants:
     DEFAULT_VOICE = "Achird"
     DEFAULT_STYLE = "motivational"
     MAX_RETRIES = 5
-    BASE_RETRY_DELAY = 5
-    MAX_RETRY_DELAY = 65
-    INTER_REQUEST_DELAY = 20.0  # ✅ FIXED: 10 req/min = 6s, لكن 20s أكثر أمان
+    FIXED_RETRY_DELAY = 70.0    # ✅ تم التعديل إلى 70 ثانية عند الفشل
+    INTER_REQUEST_DELAY = 20.0  
     MIN_AUDIO_SIZE = 500
     SCENE_TEXT_MAX_CHARS = 250
     RAW_PCM_SAMPLE_WIDTH = 2
@@ -134,9 +130,6 @@ class GeminiTTSEngine(BaseTTS):
     def _init_client(self):
         self._client = self._genai.Client(api_key=self.api_key)
 
-    # ═══════════════════════════════════════════════════════════════
-    # ✅ FIXED: Required by BaseTTS
-    # ═══════════════════════════════════════════════════════════════
     def _generate_audio_data(self, text: str, voice: str, **kwargs) -> Optional[bytes]:
         try:
             return self._call_api(text)
@@ -147,27 +140,17 @@ class GeminiTTSEngine(BaseTTS):
     def _select_voice_for_mood(self, mood: str) -> str:
         return MOOD_VOICE_MAP.get(mood, self.voice_name)
 
-    # ═══════════════════════════════════════════════════════════════
-    # Rate Limit
-    # ═══════════════════════════════════════════════════════════════
     def _wait_for_rate_limit(self):
         with self._lock:
             elapsed = time.time() - self._last_request_time
             if elapsed < self.inter_request_delay:
                 wait = self.inter_request_delay - elapsed
-                logger.debug(f"   ⏱  انتظار {wait:.1f}s")
+                logger.debug(f"   ⏱  انتظار {wait:.1f}s بين الجزأين")
                 time.sleep(wait)
             self._last_request_time = time.time()
 
-    def _extract_retry_delay(self, error_str: str) -> Optional[int]:
-        """استخراج retryDelay من رد Gemini."""
-        match = re.search(r'retryDelay.*?(\d+)', error_str)
-        if match:
-            return int(match.group(1)) + 2
-        return None
-
     # ═══════════════════════════════════════════════════════════════
-    # Main API
+    # Main API (تعديل التقسيم إلى جزأين والانتظار 70 ثانية)
     # ═══════════════════════════════════════════════════════════════
     def generate_audio(
         self,
@@ -183,32 +166,42 @@ class GeminiTTSEngine(BaseTTS):
         if not scenes:
             return TTSResult(status=TTSStatus.FAILED, output_path=output_path, error="No scenes")
 
-        total_chars = sum(len(s.get("text", "")) for s in scenes)
-        estimated_time = len(scenes) * (self.inter_request_delay + 3)
-        logger.info(f"🎙️ Gemini TTS | {len(scenes)} مشهد | ~{estimated_time:.0f}s")
+        # 1. تقسيم كافة المشاهد إلى جزأين فقط
+        mid_point = (len(scenes) + 1) // 2
+        part_1 = scenes[:mid_point]
+        part_2 = scenes[mid_point:]
+        
+        chunks = []
+        if part_1:
+            chunks.append(" . ".join([s.get("text", "").strip() for s in part_1 if s.get("text", "").strip()]))
+        if part_2:
+            chunks.append(" . ".join([s.get("text", "").strip() for s in part_2 if s.get("text", "").strip()]))
+
+        total_chars = sum(len(c) for c in chunks)
+        logger.info(f"🎙️ Gemini TTS | تم تقسيم النص إلى {len(chunks)} أجزاء بدلاً من {len(scenes)} مشاهد لتفادي الـ Rate Limit")
 
         temp_dir = Path(tempfile.mkdtemp(prefix="gemini_tts_"))
         audio_files = []
 
         try:
-            for i, scene in enumerate(scenes):
+            for i, text_chunk in enumerate(chunks):
                 if progress_callback:
-                    progress_callback(0.1 + (i / len(scenes)) * 0.75, f"مشهد {i+1}/{len(scenes)}")
+                    progress_callback(0.1 + (i / len(chunks)) * 0.75, f"جزء {i+1}/{len(chunks)}")
 
                 if i > 0:
                     self._wait_for_rate_limit()
 
-                audio_path = self._process_scene(scene, i, temp_dir)
+                audio_path = self._process_chunk(text_chunk, i, temp_dir)
                 if audio_path:
                     audio_files.append(audio_path)
                 else:
-                    logger.warning(f"   ⚠ فشل مشهد {i+1}")
+                    logger.warning(f"  ⚠ فشل توليد الجزء {i+1}")
 
             if not audio_files:
                 return TTSResult(status=TTSStatus.FAILED, output_path=output_path, error="All scenes failed")
 
             if progress_callback:
-                progress_callback(0.9, "دمج الملفات...")
+                progress_callback(0.9, "دمج الملفات الصوتية للأجزاء...")
 
             self._merge_audio(audio_files, output_path)
 
@@ -218,61 +211,51 @@ class GeminiTTSEngine(BaseTTS):
             if progress_callback:
                 progress_callback(1.0, "تم!")
 
-            logger.info(f"   ✅ تم! {len(audio_files)}/{len(scenes)} مشهد ({file_size/1024:.1f} KB) في {elapsed:.1f}s")
+            logger.info(f"   ✅ تم! نجح توليد {len(audio_files)}/{len(chunks)} جزء ({file_size/1024:.1f} KB) في {elapsed:.1f}s")
 
-            # ✅ FIXED: TTSResult صحيح
             return TTSResult(
-                status=TTSStatus.SUCCESS if len(audio_files) == len(scenes) else TTSStatus.PARTIAL,
+                status=TTSStatus.SUCCESS if len(audio_files) == len(chunks) else TTSStatus.PARTIAL,
                 output_path=output_path,
                 voice_used=self.voice_name,
                 text_length=total_chars,
                 file_size=file_size,
-                duration_estimate=estimate_duration(" ".join(s.get("text", "") for s in scenes[:len(audio_files)])),
+                duration_estimate=estimate_duration(" ".join(chunks[:len(audio_files)])),
             )
 
         except Exception as e:
-            logger.error(f"❌ فشل: {e}")
+            logger.error(f"❌ فشل السكربت بالكامل: {e}")
             return self._silence_result(output_path, str(e))
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     # ═══════════════════════════════════════════════════════════════
-    # Scene Processing
+    # Chunk Processing (انتظار 70 ثانية عند الخطأ)
     # ═══════════════════════════════════════════════════════════════
-    def _process_scene(self, scene: dict, index: int, temp_dir: Path) -> Optional[str]:
-        text = scene.get("text", "").strip()
-        if not text:
+    def _process_chunk(self, text: str, index: int, temp_dir: Path) -> Optional[str]:
+        if not text.strip():
             return None
 
-        logger.info(f"   🎤 مشهد {index+1} ({len(text)} حرف): {text[:40]}...")
-        scene_path = str(temp_dir / f"scene_{index:03d}.raw")
+        logger.info(f"   🎤 جاري معالجة الجزء {index+1} ({len(text)} حرف)...")
+        chunk_path = str(temp_dir / f"chunk_{index:03d}.raw")
 
         for attempt in range(GeminiTTSConstants.MAX_RETRIES):
             try:
                 if attempt > 0:
-                    delay = min(GeminiTTSConstants.BASE_RETRY_DELAY * (2 ** attempt), GeminiTTSConstants.MAX_RETRY_DELAY)
-                    logger.info(f"      ⏱  انتظار {delay}s")
-                    time.sleep(delay)
+                    # تعديل صريح: الانتظار 70 ثانية ثابتة عند حدوث أي فشل في المحاولة السابقة
+                    logger.info(f"      ⏱  فشل سابق أو حد استخدام.. انتظار 70 ثانية تماماً قبل المحاولة {attempt+1}...")
+                    time.sleep(GeminiTTSConstants.FIXED_RETRY_DELAY)
 
                 audio_data = self._call_api(text)
 
                 if audio_data and len(audio_data) > GeminiTTSConstants.MIN_AUDIO_SIZE:
-                    with open(scene_path, "wb") as f:
+                    with open(chunk_path, "wb") as f:
                         f.write(audio_data)
-                    return scene_path
+                    return chunk_path
 
             except Exception as e:
                 error_str = str(e)
-
-                # ✅ استخدم retryDelay من Gemini
-                gemini_delay = self._extract_retry_delay(error_str)
-                if gemini_delay:
-                    logger.warning(f"      ⚠ محاولة {attempt+1}: Rate Limit. Gemini يقترح {gemini_delay}s")
-                    time.sleep(gemini_delay)
-                    continue
-
-                logger.warning(f"      ⚠ محاولة {attempt+1}: {error_str[:80]}")
+                logger.warning(f"      ⚠ خطأ في المحاولة {attempt+1}: {error_str[:90]}")
 
         return None
 
@@ -307,11 +290,11 @@ class GeminiTTSEngine(BaseTTS):
         )
 
         if not response.candidates:
-            raise RuntimeError("لم يتم استلام رد")
+            raise RuntimeError("لم يتم استلام رد من نموذج الصوت")
 
         candidate = response.candidates[0]
         if not candidate.content or not candidate.content.parts:
-            raise RuntimeError("لا محتوى في الرد")
+            raise RuntimeError("لا محتوى في رد Gemini")
 
         audio_parts = []
         for part in candidate.content.parts:
@@ -319,30 +302,26 @@ class GeminiTTSEngine(BaseTTS):
                 audio_parts.append(part.inline_data.data)
 
         if not audio_parts:
-            raise RuntimeError("لم يتم استلام بيانات صوتية")
+            raise RuntimeError("لم يتم استلام بيانات صوتية من الـ API")
 
         return b"".join(audio_parts)
 
     # ═══════════════════════════════════════════════════════════════
-    # ✅ FIXED: Audio Merging (يدعم raw PCM)
+    # Audio Merging
     # ═══════════════════════════════════════════════════════════════
     def _merge_audio(self, files: List[str], output: str):
-        """دمج ملفات الصوت (يدعم raw PCM + wav + mp3)."""
         if not files:
-            raise RuntimeError("لا توجد ملفات")
+            raise RuntimeError("لا توجد ملفات لدمجها")
 
         combined = self._AudioSegment.empty()
 
         for f in files:
             segment = None
-
-            # محاولة 1: from_file (للملفات العادية)
             try:
                 segment = self._AudioSegment.from_file(f)
             except Exception:
                 pass
 
-            # محاولة 2: from_raw (لـ raw PCM من Gemini)
             if segment is None:
                 try:
                     with open(f, "rb") as fh:
@@ -355,20 +334,20 @@ class GeminiTTSEngine(BaseTTS):
                             frame_rate=GeminiTTSConstants.RAW_PCM_FRAME_RATE,
                             channels=GeminiTTSConstants.RAW_PCM_CHANNELS,
                         )
-                        logger.info(f"   ✓ {Path(f).name} → raw PCM")
+                        logger.info(f"   ✓ {Path(f).name} → تم التحويل كـ raw PCM")
                 except Exception as e2:
-                    logger.error(f"   ❌ فشل {Path(f).name}: {e2}")
+                    logger.error(f"   ❌ فشل دمج {Path(f).name}: {e2}")
                     continue
 
             if segment is not None:
                 combined += segment
 
         if len(combined) == 0:
-            raise RuntimeError("لا بيانات صوتية")
+            raise RuntimeError("الملفات الصوتية المدمجة فارغة")
 
         fmt = "mp3" if output.endswith(".mp3") else "wav"
         combined.export(output, format=fmt, bitrate="192k" if fmt == "mp3" else None)
-        logger.info(f"   ✓ دُمج {len(files)} ملف")
+        logger.info(f"   ✓ دُمج بنجاح {len(files)} كتل صوتية.")
 
     # ═══════════════════════════════════════════════════════════════
     # Scene Extraction
@@ -398,9 +377,6 @@ class GeminiTTSEngine(BaseTTS):
         hook = script.get("hook", "").strip()
         return [{"text": hook}] if hook else []
 
-    # ═══════════════════════════════════════════════════════════════
-    # Utilities
-    # ═══════════════════════════════════════════════════════════════
     @staticmethod
     def list_voices():
         return GEMINI_VOICES.copy()
